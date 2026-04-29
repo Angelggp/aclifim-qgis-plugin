@@ -1,0 +1,91 @@
+# ------------------------------
+
+# 🐍 Python
+
+# ------------------------------
+
+**pycache**/
+*.pyc
+*.pyo
+*.pyd
+*.pyc.*
+*.py,cover
+
+# Entornos virtuales
+
+venv/
+.env/
+.envrc/
+.venv/
+
+# ------------------------------
+
+# 🧠 IDEs / Editores
+
+# ------------------------------
+
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ------------------------------
+
+# 🧪 Testing / coverage
+
+# ------------------------------
+
+.coverage
+htmlcov/
+.pytest_cache/
+
+# ------------------------------
+
+# 📦 Build / distribución
+
+# ------------------------------
+
+dist/
+build/
+*.egg-info/
+
+# ------------------------------
+
+# 🗄️ Archivos de base de datos locales
+
+# ------------------------------
+
+*.sqlite
+*.db
+
+# ------------------------------
+
+# 🗺️ QGIS
+
+# ------------------------------
+
+*.qgz~
+*.qgs~
+*.qgd
+
+# backups de proyecto QGIS
+
+*.bak
+
+# ------------------------------
+
+# 🔐 Configuración sensible
+
+# ------------------------------
+
+.env
+config.json
+
+# ------------------------------
+
+# 🖼️ Archivos innecesarios
+
+# ------------------------------
+
+.DS_Store
+Thumbs.db
