@@ -1,91 +1,90 @@
-# ------------------------------
+# =============================
+# Python
+# =============================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
 
-# 🐍 Python
-
-# ------------------------------
-
-**pycache**/
-*.pyc
-*.pyo
-*.pyd
-*.pyc.*
-*.py,cover
-
+# =============================
 # Entornos virtuales
-
+# =============================
 venv/
-.env/
-.envrc/
 .venv/
+env/
+ENV/
+.envrc
 
-# ------------------------------
-
-# 🧠 IDEs / Editores
-
-# ------------------------------
-
+# =============================
+# IDEs
+# =============================
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
-# ------------------------------
-
-# 🧪 Testing / coverage
-
-# ------------------------------
-
+# =============================
+# Testing
+# =============================
 .coverage
 htmlcov/
 .pytest_cache/
+.tox/
 
-# ------------------------------
-
-# 📦 Build / distribución
-
-# ------------------------------
-
+# =============================
+# Build/Distribución
+# =============================
 dist/
 build/
 *.egg-info/
+*.egg
 
-# ------------------------------
-
-# 🗄️ Archivos de base de datos locales
-
-# ------------------------------
-
+# =============================
+# Base de datos
+# =============================
 *.sqlite
 *.db
+*.accdb
+*.mdb
 
-# ------------------------------
-
-# 🗺️ QGIS
-
-# ------------------------------
-
+# =============================
+# QGIS
+# =============================
 *.qgz~
 *.qgs~
 *.qgd
-
-# backups de proyecto QGIS
-
 *.bak
 
-# ------------------------------
-
-# 🔐 Configuración sensible
-
-# ------------------------------
-
+# =============================
+# Configuración sensible
+# =============================
 .env
 config.json
+*.ini
+db_credentials.py
 
-# ------------------------------
-
-# 🖼️ Archivos innecesarios
-
-# ------------------------------
-
+# =============================
+# OS
+# =============================
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# =============================
+# Específico del proyecto
+# =============================
+# Bases de datos Access de prueba (si son grandes)
+/test_data/*.accdb
+
+# Logs del plugin
+logs/
+*.log
+
+# Compilados de recursos Qt
+*_rc.py
+
+# Archivos temporales de desarrollo
+TODO.txt
+NOTES.md
