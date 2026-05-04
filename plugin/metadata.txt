@@ -1,0 +1,7 @@
+[general]
+name=ACLIFIM Plugin
+description=Plugin para gestión geoespacial de afiliados
+version=0.1
+qgisMinimumVersion=3.0
+author=Amauri Herrera Díaz
+email=[tu@email.com](mailto:tu@email.com)
