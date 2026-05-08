@@ -26,16 +26,30 @@ def load_db_config():
 
 
 def get_or_create_layer():
+    """
+    Obtiene o crea la capa de afiliados desde PostgreSQL/PostGIS.
+    
+    IMPORTANTE: Esta función ya NO crea capas temporales en memoria.
+    Si no hay conexión a PostgreSQL, retorna None.
+    
+    Returns:
+        QgsVectorLayer: Capa de afiliados desde PostGIS, o None si no hay conexión
+    """
     layer_name = "Afiliados"
     
     # Cargar configuración de BD
     config = load_db_config()
     
+    if not config:
+        print("[PLUGIN] ERROR: No hay configuración de base de datos PostgreSQL.")
+        print("[PLUGIN] Por favor, configure la conexión a PostgreSQL desde el menú del plugin.")
+        return None
+    
     # Buscar si ya existe la capa en el proyecto
     for layer in QgsProject.instance().mapLayers().values():
         if layer.name() == layer_name:
-            # Verificar que sea una capa válida y de la BD correcta
-            if config and layer.providerType() == "postgres":
+            # Verificar que sea una capa válida de PostgreSQL
+            if layer.providerType() == "postgres":
                 # Obtener la fuente de datos de la capa
                 source = layer.dataProvider().dataSourceUri()
                 # Verificar que sea de nuestra BD
@@ -46,61 +60,41 @@ def get_or_create_layer():
                     print(f"[PLUGIN] Capa '{layer_name}' encontrada pero conectada a otra BD, eliminando...")
                     QgsProject.instance().removeMapLayer(layer.id())
                     break
-            elif not config and layer.providerType() == "memory":
-                print(f"[PLUGIN] Capa encontrada: {layer_name} (Memoria)")
-                return layer
             else:
-                # Capa con mismo nombre pero tipo incorrecto
-                print(f"[PLUGIN] Capa '{layer_name}' de tipo incorrecto, eliminando...")
+                # Eliminar capas antiguas que no son de PostgreSQL
+                print(f"[PLUGIN] Capa '{layer_name}' de tipo '{layer.providerType()}' encontrada, eliminando...")
                 QgsProject.instance().removeMapLayer(layer.id())
                 break
     
-    # Intentar cargar desde PostGIS
-    if config:
-        print("[PLUGIN] Configuración de BD encontrada, intentando conectar a PostGIS...")
-        try:
-            # Crear URI de conexión
-            uri = QgsDataSourceUri()
-            uri.setConnection(
-                config['host'],
-                config['port'],
-                config['dbname'],
-                config['user'],
-                config['password']
-            )
-            uri.setDataSource("public", "afiliados", "geom", "", "id")
+    # Cargar capa desde PostGIS
+    print("[PLUGIN] Conectando a PostgreSQL/PostGIS...")
+    try:
+        # Crear URI de conexión
+        uri = QgsDataSourceUri()
+        uri.setConnection(
+            config['host'],
+            config['port'],
+            config['dbname'],
+            config['user'],
+            config['password']
+        )
+        uri.setDataSource("public", "afiliados", "geom", "", "id")
+        
+        # Crear capa desde PostGIS
+        layer = QgsVectorLayer(uri.uri(), layer_name, "postgres")
+        
+        if layer.isValid():
+            QgsProject.instance().addMapLayer(layer)
+            print(f"[PLUGIN] ✅ Capa '{layer_name}' cargada desde PostGIS ({config['dbname']})")
+            return layer
+        else:
+            print(f"[PLUGIN] ❌ Error al cargar capa desde PostGIS")
+            print(f"[PLUGIN] Verifique que la tabla 'afiliados' exista en la base de datos")
+            return None
             
-            # Crear capa desde PostGIS
-            layer = QgsVectorLayer(uri.uri(), layer_name, "postgres")
-            
-            if layer.isValid():
-                QgsProject.instance().addMapLayer(layer)
-                print(f"[PLUGIN] Capa '{layer_name}' cargada desde PostGIS ({config['dbname']})")
-                print(f"[PLUGIN] Fuente de datos: {layer.dataProvider().dataSourceUri()}")
-                return layer
-            else:
-                print("[PLUGIN] Error al cargar capa desde PostGIS, usando capa de memoria")
-        except Exception as e:
-            print(f"[PLUGIN] Excepción al conectar a PostGIS: {e}, usando capa de memoria")
-    else:
-        print("[PLUGIN] No hay configuración de BD, usando capa de memoria")
-    
-    # Fallback: crear capa de memoria
-    layer = QgsVectorLayer("Point?crs=EPSG:4326", f"{layer_name} (Temporal)", "memory")
-    provider = layer.dataProvider()
-    
-    # Añadir campos para atributos
-    from qgis.core import QgsField
-    from PyQt5.QtCore import QVariant
-    provider.addAttributes([
-        QgsField("nombre", QVariant.String),
-        QgsField("direccion", QVariant.String),
-        QgsField("municipio", QVariant.String),
-    ])
-    layer.updateFields()
-    QgsProject.instance().addMapLayer(layer)
-    print(f"[PLUGIN] Capa '{layer_name} (Temporal)' creada en memoria")
-    return layer
+    except Exception as e:
+        print(f"[PLUGIN] ❌ Excepción al conectar a PostGIS: {e}")
+        return None
 
 
 def add_test_point(iface):

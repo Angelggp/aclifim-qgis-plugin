@@ -10,6 +10,25 @@ Plugin de QGIS para la gestión geoespacial de afiliados con importación desde 
 - 🔍 Búsqueda y filtrado avanzado
 - 📊 Centros de interés y análisis espacial
 - 🔄 Sincronización inteligente de datos
+- 📋 Sistema de catálogos - Conversión automática de códigos a descripciones legibles
+- 🎨 Interfaz moderna con pestañas organizadas
+
+## 🆕 Mejoras Recientes v2.1 (Mayo 2026)
+
+### Interfaz Rediseñada
+✅ **Nuevo diseño con pestañas** - 6 pestañas organizadas (Identificación, Ubicación, Médicos, Familiares, Laborales, Organización)  
+✅ **Una sola columna** - Más fácil de leer y copiar información  
+✅ **Valores vacíos claros** - Campos sin datos muestran "No especificado"  
+✅ **Texto seleccionable** - Puedes copiar cualquier valor con el mouse  
+✅ **Scroll suave** - Navegación fluida dentro de cada pestaña  
+
+### Optimización de Código
+✅ **Capas temporales eliminadas** - Ya no se crean capas en memoria innecesarias  
+✅ **PostgreSQL obligatorio** - Datos siempre persistentes y seguros  
+✅ **50% menos código** - Más simple y fácil de mantener  
+✅ **Campo "Org_Rev" oculto** - Interfaz más limpia  
+
+Ver [RESUMEN_EJECUTIVO_MAYO_2026.md](docs/RESUMEN_EJECUTIVO_MAYO_2026.md) para detalles completos.
 
 ## 🆕 Mejoras de Compatibilidad v2.0
 
@@ -20,7 +39,36 @@ Plugin de QGIS para la gestión geoespacial de afiliados con importación desde 
 ✅ **Script de verificación de dependencias** - Diagnóstico automático  
 ✅ **Documentación completa** - Guías de instalación, troubleshooting, y requisitos
 
-Ver [MEJORAS_IMPLEMENTADAS.md](docs/MEJORAS_IMPLEMENTADAS.md) para detalles técnicos completos.
+Ver [MEJORAS_IMPLEMENTADAS.md](docs/MEJORAS_IMPLEMENTADAS.md) para detalles técnicos de v2.0.
+
+## 📋 Sistema de Catálogos
+
+El plugin convierte automáticamente códigos numéricos a descripciones legibles:
+
+**Antes:**  
+```
+Limitación: [vacío]
+Código: 01
+```
+
+**Ahora:**  
+```
+Limitación: Amputado en 1 Pierna (01)
+Nivel Ambulación: Bastón/Muleta + Prótesis (08)
+```
+
+**Catálogos incluidos:**
+- 🦿 **Limitaciones** (01-15): Amputaciones, parálisis, y otras limitaciones
+- 🚶 **Ambulación** (00-16): Encamado, silla de ruedas, ayudas técnicas, movilidad independiente
+
+**Características:**
+- ✅ Conversión automática en toda la interfaz
+- ✅ Manejo inteligente de códigos con/sin ceros (1 → 01)
+- ✅ Valores nulos muestran "No especificado"
+- ✅ Formato consistente: "Descripción (XX)"
+- ✅ Fácil agregar nuevos catálogos
+
+Ver [SISTEMA_CATALOGOS.md](docs/SISTEMA_CATALOGOS.md) para listado completo y guía de desarrollo.
 
 ## 🚀 Inicio Rápido
 
@@ -72,7 +120,11 @@ if success:
 | [REQUISITOS_SISTEMA.md](docs/REQUISITOS_SISTEMA.md) | Requisitos técnicos detallados | Antes de instalar |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Solución de problemas comunes | Cuando hay errores |
 | [IMPORTACION_CON_PASSWORD.md](docs/IMPORTACION_CON_PASSWORD.md) | 🆕 Guía de importación con contraseña | Para BD protegidas |
-| [MEJORAS_IMPLEMENTADAS.md](docs/MEJORAS_IMPLEMENTADAS.md) | Detalles técnicos de mejoras | Para desarrolladores |
+| [SISTEMA_CATALOGOS.md](docs/SISTEMA_CATALOGOS.md) | 🆕 Sistema de códigos y descripciones | Para ver catálogos o agregar nuevos |
+| [CAMBIOS_UI_MAYO_2026.md](docs/CAMBIOS_UI_MAYO_2026.md) | 🆕 Rediseño de interfaz con pestañas | Para entender nueva UI |
+| [LIMPIEZA_CODIGO_MAYO_2026.md](docs/LIMPIEZA_CODIGO_MAYO_2026.md) | 🆕 Eliminación de código innecesario | Para desarrolladores |
+| [RESUMEN_EJECUTIVO_MAYO_2026.md](docs/RESUMEN_EJECUTIVO_MAYO_2026.md) | 🆕 Resumen de todas las mejoras v2.1 | Para overview completo |
+| [MEJORAS_IMPLEMENTADAS.md](docs/MEJORAS_IMPLEMENTADAS.md) | Detalles técnicos de mejoras v2.0 | Para desarrolladores |
 
 ## 🔐 Nuevo: Importación desde Access con Contraseña
 

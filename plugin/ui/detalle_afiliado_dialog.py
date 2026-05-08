@@ -10,296 +10,428 @@ from qgis.PyQt.QtWidgets import (
     QGroupBox,
     QGridLayout,
     QScrollArea,
-    QWidget
+    QWidget,
+    QTabWidget
 )
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtGui import QFont
 
+# Importar catálogos de códigos
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from utils.catalogos import get_limitacion_descripcion, get_ambulacion_descripcion
+
 
 class DetalleAfiliadoDialog(QDialog):
-    """Muestra todos los detalles de un afiliado"""
+    """Muestra todos los detalles de un afiliado con diseño de pestañas y dos columnas"""
     
     def __init__(self, afiliado, parent=None):
         super().__init__(parent)
         self.afiliado = afiliado
-        self.setWindowTitle(f"Detalles del Afiliado - {afiliado.get('nombres', '')} {afiliado.get('apellidos', '')}")
-        self.resize(700, 600)
+        nombre_completo = f"{afiliado.get('nombres', '')} {afiliado.get('apellidos', '')}".strip()
+        self.setWindowTitle(f"📋 Detalles del Afiliado - {nombre_completo or 'Sin nombre'}")
+        self.resize(800, 700)
         
         self.init_ui()
     
     def init_ui(self):
-        """Inicializa la interfaz"""
+        """Inicializa la interfaz con diseño de pestañas"""
         main_layout = QVBoxLayout()
         
-        # Título
-        title = QLabel(f"📋 Información Completa del Afiliado")
+        # Título con nombre del afiliado
+        nombre_completo = f"{self.afiliado.get('nombres', '')} {self.afiliado.get('apellidos', '')}".strip()
+        title = QLabel(f"👤 {nombre_completo or 'Sin nombre'}")
         title_font = QFont()
-        title_font.setPointSize(12)
+        title_font.setPointSize(14)
         title_font.setBold(True)
         title.setFont(title_font)
         title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("color: #2c3e50; padding: 10px;")
         main_layout.addWidget(title)
         
-        # Scroll area para todo el contenido
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Widget de pestañas
+        tab_widget = QTabWidget()
+        tab_widget.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #cccccc;
+                background: white;
+            }
+            QTabBar::tab {
+                background: #f0f0f0;
+                border: 1px solid #cccccc;
+                padding: 8px 16px;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                background: white;
+                border-bottom-color: white;
+                font-weight: bold;
+            }
+        """)
         
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout()
+        # Pestañas con emojis
+        tab_widget.addTab(self.create_tab_identificacion(), "🆔 Identificación")
+        tab_widget.addTab(self.create_tab_ubicacion(), "📍 Ubicación")
+        tab_widget.addTab(self.create_tab_medicos(), "🏥 Médicos")
+        tab_widget.addTab(self.create_tab_familiares(), "👨‍👩‍👧 Familiares")
+        tab_widget.addTab(self.create_tab_laborales(), "💼 Laborales")
+        tab_widget.addTab(self.create_tab_organizacion(), "🏛️ Organización")
         
-        # Grupo 1: Identificación
-        scroll_layout.addWidget(self.create_identificacion_group())
-        
-        # Grupo 2: Datos Demográficos
-        scroll_layout.addWidget(self.create_demograficos_group())
-        
-        # Grupo 3: Ubicación y Contacto
-        scroll_layout.addWidget(self.create_ubicacion_group())
-        
-        # Grupo 4: Datos Familiares
-        scroll_layout.addWidget(self.create_familiares_group())
-        
-        # Grupo 5: Datos Médicos
-        scroll_layout.addWidget(self.create_medicos_group())
-        
-        # Grupo 6: Datos Laborales/Educativos
-        scroll_layout.addWidget(self.create_laborales_group())
-        
-        # Grupo 7: Organización
-        scroll_layout.addWidget(self.create_organizacion_group())
-        
-        # Grupo 8: Fechas Administrativas
-        scroll_layout.addWidget(self.create_fechas_group())
-        
-        # Grupo 9: Estado del Sistema
-        scroll_layout.addWidget(self.create_estado_group())
-        
-        scroll_widget.setLayout(scroll_layout)
-        scroll.setWidget(scroll_widget)
-        main_layout.addWidget(scroll)
+        main_layout.addWidget(tab_widget)
         
         # Botón cerrar
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        btn_cerrar = QPushButton("Cerrar")
+        btn_cerrar = QPushButton("✖ Cerrar")
         btn_cerrar.clicked.connect(self.accept)
-        btn_cerrar.setMinimumWidth(100)
+        btn_cerrar.setMinimumWidth(120)
+        btn_cerrar.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                font-weight: bold;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
         btn_layout.addWidget(btn_cerrar)
         main_layout.addLayout(btn_layout)
         
         self.setLayout(main_layout)
     
-    def create_identificacion_group(self):
-        """Grupo de identificación"""
-        group = QGroupBox("👤 Identificación")
-        layout = QGridLayout()
-        
-        row = 0
-        self.add_field(layout, row, "Código:", self.afiliado.get('codigo'))
-        self.add_field(layout, row, "CI (Carnet):", self.afiliado.get('carnet_id'), col_offset=2)
-        
-        row += 1
-        self.add_field(layout, row, "Folio:", self.afiliado.get('folio'))
-        self.add_field(layout, row, "ID Sistema:", self.afiliado.get('id'), col_offset=2)
-        
-        row += 1
-        self.add_field(layout, row, "Nombres:", self.afiliado.get('nombres'), span=3)
-        
-        row += 1
-        self.add_field(layout, row, "Apellidos:", self.afiliado.get('apellidos'), span=3)
-        
-        group.setLayout(layout)
-        return group
+    # ============= PESTAÑAS CON 2 COLUMNAS =============
     
-    def create_demograficos_group(self):
-        """Grupo de datos demográficos"""
-        group = QGroupBox("🌍 Datos Demográficos")
-        layout = QGridLayout()
+    def create_tab_identificacion(self):
+        """Pestaña de identificación y datos personales con 2 columnas"""
+        widget = QWidget()
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
+        
+        # Grid con 2 columnas
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(40)
+        grid.setVerticalSpacing(15)
         
         row = 0
-        self.add_field(layout, row, "Sexo:", self.afiliado.get('sexo'))
-        self.add_field(layout, row, "Edad:", self.afiliado.get('edad'), col_offset=2)
+        # Columna 1 y 2
+        self.add_grid_field(grid, row, 0, "Código:", self.afiliado.get('codigo'))
+        self.add_grid_field(grid, row, 2, "CI (Carnet):", self.afiliado.get('carnet_id'))
+        
+        row += 1
+        self.add_grid_field(grid, row, 0, "Folio:", self.afiliado.get('folio'))
+        self.add_grid_field(grid, row, 2, "ID Sistema:", self.afiliado.get('id'))
+        
+        row += 1
+        self.add_section_title(grid, row, "DATOS PERSONALES")
+        
+        row += 1
+        self.add_grid_field(grid, row, 0, "Nombres:", self.afiliado.get('nombres'))
+        self.add_grid_field(grid, row, 2, "Apellidos:", self.afiliado.get('apellidos'))
+        
+        row += 1
+        self.add_grid_field(grid, row, 0, "Sexo:", self.afiliado.get('sexo'))
+        self.add_grid_field(grid, row, 2, "Edad:", self.afiliado.get('edad'))
+        
+        row += 1
+        self.add_section_title(grid, row, "NACIMIENTO")
         
         row += 1
         fecha_nac = self.format_date(self.afiliado.get('fecha_nacimiento'))
-        self.add_field(layout, row, "Fecha Nacimiento:", fecha_nac, span=3)
+        self.add_grid_field(grid, row, 0, "Fecha Nacimiento:", fecha_nac)
+        self.add_grid_field(grid, row, 2, "Lugar Nacimiento:", self.afiliado.get('lugar_nacimiento'))
         
         row += 1
-        self.add_field(layout, row, "Lugar Nacimiento:", self.afiliado.get('lugar_nacimiento'), span=3)
+        self.add_grid_field(grid, row, 0, "Nacionalidad:", self.afiliado.get('nacionalidad'))
+        self.add_grid_field(grid, row, 2, "Ciudadanía:", self.afiliado.get('ciudadania'))
         
-        row += 1
-        self.add_field(layout, row, "Nacionalidad:", self.afiliado.get('nacionalidad'))
-        self.add_field(layout, row, "Ciudadanía:", self.afiliado.get('ciudadania'), col_offset=2)
+        main_layout.addLayout(grid)
+        main_layout.addStretch()
+        widget.setLayout(main_layout)
         
-        group.setLayout(layout)
-        return group
+        # Scroll
+        scroll = QScrollArea()
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        return scroll
     
-    def create_ubicacion_group(self):
-        """Grupo de ubicación y contacto"""
-        group = QGroupBox("📍 Ubicación y Contacto")
-        layout = QGridLayout()
+    def create_tab_ubicacion(self):
+        """Pestaña de ubicación con 2 columnas"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(40)
+        grid.setVerticalSpacing(15)
         
         row = 0
-        self.add_field(layout, row, "Dirección:", self.afiliado.get('direccion'), span=3)
+        self.add_grid_field(grid, row, 0, "Dirección:", self.afiliado.get('direccion'))
+        self.add_grid_field(grid, row, 2, "Reparto:", self.afiliado.get('reparto'))
         
         row += 1
-        self.add_field(layout, row, "Reparto:", self.afiliado.get('reparto'))
-        self.add_field(layout, row, "Locación:", self.afiliado.get('locacion'), col_offset=2)
+        self.add_grid_field(grid, row, 0, "Locación:", self.afiliado.get('locacion'))
+        self.add_grid_field(grid, row, 2, "Teléfono:", self.afiliado.get('telefono'))
         
         row += 1
-        self.add_field(layout, row, "Teléfono:", self.afiliado.get('telefono'))
-        self.add_field(layout, row, "Tipo Tel.:", self.afiliado.get('tipo_telefono'), col_offset=2)
+        self.add_grid_field(grid, row, 0, "Tipo Teléfono:", self.afiliado.get('tipo_telefono'))
+        
+        row += 1
+        self.add_separator(grid, row)
         
         row += 1
         lon = self.afiliado.get('lon')
         lat = self.afiliado.get('lat')
-        coordenadas = f"{lon:.6f}, {lat:.6f}" if lon and lat else "Sin ubicar"
-        self.add_field(layout, row, "Coordenadas:", coordenadas, span=3)
+        if lon and lat:
+            self.add_grid_field(grid, row, 0, "Longitud:", f"{lon:.6f}")
+            self.add_grid_field(grid, row, 2, "Latitud:", f"{lat:.6f}")
+        else:
+            self.add_grid_field(grid, row, 0, "Coordenadas GPS:", "Sin ubicar")
         
-        group.setLayout(layout)
-        return group
+        layout.addLayout(grid)
+        layout.addStretch()
+        widget.setLayout(layout)
+        
+        scroll = QScrollArea()
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        return scroll
     
-    def create_familiares_group(self):
-        """Grupo de datos familiares"""
-        group = QGroupBox("👨‍👩‍👧‍👦 Datos Familiares")
-        layout = QGridLayout()
+    def create_tab_medicos(self):
+        """Pestaña de datos médicos con 2 columnas"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(40)
+        grid.setVerticalSpacing(15)
         
         row = 0
-        self.add_field(layout, row, "Hijo de:", self.afiliado.get('hijo_de'), span=3)
+        # Limitación - mostrar descripción legible
+        limitacion_cod = self.afiliado.get('limitacion_cod') or self.afiliado.get('limitacion')
+        limitacion_desc = get_limitacion_descripcion(limitacion_cod)
+        self.add_grid_field(grid, row, 0, "Limitación:", limitacion_desc)
+        
+        # Ambulación - mostrar descripción legible
+        ambulacion_cod = self.afiliado.get('ambulacion_cod') or self.afiliado.get('nivel_ambulacion')
+        ambulacion_desc = get_ambulacion_descripcion(ambulacion_cod)
+        self.add_grid_field(grid, row, 2, "Nivel Ambulación:", ambulacion_desc)
         
         row += 1
-        self.add_field(layout, row, "Estado Civil:", self.afiliado.get('estado_civil'))
-        self.add_field(layout, row, "N° Hijos:", self.afiliado.get('no_hijos'), col_offset=2)
+        self.add_separator(grid, row)
         
         row += 1
-        self.add_field(layout, row, "Conviventes:", self.afiliado.get('conviventes'))
-        self.add_field(layout, row, "Personas Dep.:", self.afiliado.get('no_personas_dep'), col_offset=2)
+        self.add_grid_field(grid, row, 0, "Causa:", self.afiliado.get('causa'))
+        self.add_grid_field(grid, row, 2, "Discapacidad Asociada:", self.afiliado.get('discap_asociada'))
         
-        group.setLayout(layout)
-        return group
+        layout.addLayout(grid)
+        layout.addStretch()
+        widget.setLayout(layout)
+        
+        scroll = QScrollArea()
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        return scroll
     
-    def create_medicos_group(self):
-        """Grupo de datos médicos"""
-        group = QGroupBox("🏥 Datos Médicos / Discapacidad")
-        layout = QGridLayout()
+    def create_tab_familiares(self):
+        """Pestaña de datos familiares con 2 columnas"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(40)
+        grid.setVerticalSpacing(15)
         
         row = 0
-        self.add_field(layout, row, "Limitación:", self.afiliado.get('limitacion'))
-        self.add_field(layout, row, "Código:", self.afiliado.get('limitacion_cod'), col_offset=2)
+        self.add_grid_field(grid, row, 0, "Hijo de:", self.afiliado.get('hijo_de'))
+        self.add_grid_field(grid, row, 2, "Estado Civil:", self.afiliado.get('estado_civil'))
         
         row += 1
-        self.add_field(layout, row, "Nivel Ambulación:", self.afiliado.get('nivel_ambulacion'))
-        self.add_field(layout, row, "Código:", self.afiliado.get('ambulacion_cod'), col_offset=2)
+        self.add_grid_field(grid, row, 0, "Número de Hijos:", self.afiliado.get('no_hijos'))
+        self.add_grid_field(grid, row, 2, "Conviventes:", self.afiliado.get('conviventes'))
         
         row += 1
-        self.add_field(layout, row, "Causa:", self.afiliado.get('causa'), span=3)
+        self.add_grid_field(grid, row, 0, "Personas Dependientes:", self.afiliado.get('no_personas_dep'))
         
-        row += 1
-        self.add_field(layout, row, "Discap. Asociada:", self.afiliado.get('discap_asociada'), span=3)
+        layout.addLayout(grid)
+        layout.addStretch()
+        widget.setLayout(layout)
         
-        group.setLayout(layout)
-        return group
+        scroll = QScrollArea()
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        return scroll
     
-    def create_laborales_group(self):
-        """Grupo de datos laborales y educativos"""
-        group = QGroupBox("💼 Datos Laborales y Educativos")
-        layout = QGridLayout()
+    def create_tab_laborales(self):
+        """Pestaña de datos laborales y educativos con 2 columnas"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(40)
+        grid.setVerticalSpacing(15)
         
         row = 0
-        self.add_field(layout, row, "Ocupación:", self.afiliado.get('ocupacion'), span=3)
-        
-        row += 1
-        self.add_field(layout, row, "Centro Trabajo/Estudio:", self.afiliado.get('centro_trabajo'), span=3)
+        self.add_grid_field(grid, row, 0, "Ocupación:", self.afiliado.get('ocupacion'))
+        self.add_grid_field(grid, row, 2, "Centro Trabajo/Estudio:", self.afiliado.get('centro_trabajo'))
         
         row += 1
         ingreso = self.afiliado.get('ingreso_mensual')
         ingreso_str = f"${ingreso:.2f}" if ingreso else "No especificado"
-        self.add_field(layout, row, "Ingreso Mensual:", ingreso_str)
+        self.add_grid_field(grid, row, 0, "Ingreso Mensual:", ingreso_str)
         
         row += 1
-        self.add_field(layout, row, "Grado Escolar:", self.afiliado.get('grado_escolar'))
-        self.add_field(layout, row, "Especialidad:", self.afiliado.get('especialidad'), col_offset=2)
+        self.add_separator(grid, row)
         
-        group.setLayout(layout)
-        return group
+        row += 1
+        self.add_grid_field(grid, row, 0, "Grado Escolar:", self.afiliado.get('grado_escolar'))
+        self.add_grid_field(grid, row, 2, "Especialidad:", self.afiliado.get('especialidad'))
+        
+        layout.addLayout(grid)
+        layout.addStretch()
+        widget.setLayout(layout)
+        
+        scroll = QScrollArea()
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        return scroll
     
-    def create_organizacion_group(self):
-        """Grupo de datos de organización"""
-        group = QGroupBox("🏛️ Organización ACLIFIM")
-        layout = QGridLayout()
+    def create_tab_organizacion(self):
+        """Pestaña de datos de organización y administrativos con 2 columnas"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(40)
+        grid.setVerticalSpacing(15)
         
         row = 0
-        self.add_field(layout, row, "Área:", self.afiliado.get('area'))
+        self.add_grid_field(grid, row, 0, "Área:", self.afiliado.get('area'))
+        self.add_grid_field(grid, row, 2, "Jefe de Núcleo:", self.afiliado.get('jefe_nucleo'))
+        
+        row += 1
         cuota = self.afiliado.get('cuota')
         cuota_str = f"${cuota:.2f}" if cuota else "No especificado"
-        self.add_field(layout, row, "Cuota:", cuota_str, col_offset=2)
+        self.add_grid_field(grid, row, 0, "Cuota:", cuota_str)
         
         row += 1
-        self.add_field(layout, row, "Jefe de Núcleo:", self.afiliado.get('jefe_nucleo'))
-        self.add_field(layout, row, "Org. Rev.:", self.afiliado.get('org_rev'), col_offset=2)
+        self.add_separator(grid, row)
         
-        group.setLayout(layout)
-        return group
-    
-    def create_fechas_group(self):
-        """Grupo de fechas administrativas"""
-        group = QGroupBox("📅 Fechas Administrativas")
-        layout = QGridLayout()
-        
-        row = 0
+        row += 1
         fecha_ingr = self.format_date(self.afiliado.get('fecha_ingreso'))
-        self.add_field(layout, row, "Fecha Ingreso:", fecha_ingr)
+        self.add_grid_field(grid, row, 0, "Fecha Ingreso:", fecha_ingr)
         
         fecha_alta = self.format_date(self.afiliado.get('fecha_alta'))
-        self.add_field(layout, row, "Fecha Alta:", fecha_alta, col_offset=2)
+        self.add_grid_field(grid, row, 2, "Fecha Alta:", fecha_alta)
         
         row += 1
         fecha_baja = self.format_date(self.afiliado.get('fecha_baja'))
-        self.add_field(layout, row, "Fecha Baja:", fecha_baja)
-        self.add_field(layout, row, "Motivo Baja:", self.afiliado.get('motivo_baja'), col_offset=2)
+        self.add_grid_field(grid, row, 0, "Fecha Baja:", fecha_baja)
+        self.add_grid_field(grid, row, 2, "Motivo Baja:", self.afiliado.get('motivo_baja'))
         
-        group.setLayout(layout)
-        return group
-    
-    def create_estado_group(self):
-        """Grupo de estado del sistema"""
-        group = QGroupBox("⚙️ Estado del Sistema")
-        layout = QGridLayout()
+        row += 1
+        self.add_separator(grid, row)
         
-        row = 0
+        row += 1
         estado = self.afiliado.get('estado', 'normal')
         estado_display = {
             'nuevo': '🆕 Nuevo (sin ubicar)',
             'cambio_direccion': '📍 Cambio de dirección (re-ubicar)',
             'normal': '✅ Normal'
         }.get(estado, estado)
-        self.add_field(layout, row, "Estado:", estado_display)
+        self.add_grid_field(grid, row, 0, "Estado:", estado_display)
         
         row += 1
         fecha_creacion = self.format_datetime(self.afiliado.get('fecha_creacion'))
-        self.add_field(layout, row, "Creado:", fecha_creacion, span=3)
+        self.add_grid_field(grid, row, 0, "Fecha Creación:", fecha_creacion)
         
         row += 1
         fecha_mod = self.format_datetime(self.afiliado.get('fecha_modificacion'))
-        self.add_field(layout, row, "Última Modificación:", fecha_mod, span=3)
+        self.add_grid_field(grid, row, 0, "Última Modificación:", fecha_mod)
         
-        group.setLayout(layout)
-        return group
+        layout.addLayout(grid)
+        layout.addStretch()
+        widget.setLayout(layout)
+        
+        scroll = QScrollArea()
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        return scroll
     
-    def add_field(self, layout, row, label_text, value, col_offset=0, span=1):
-        """Agrega un campo al layout"""
+    # ============= MÉTODOS AUXILIARES PARA GRID =============
+    
+    def add_grid_field(self, grid, row, col, label_text, value):
+        """Agrega un campo al grid (label + valor en columnas específicas)"""
+        # Label
         label = QLabel(label_text)
-        label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(label, row, col_offset)
+        label_font = QFont()
+        label_font.setBold(True)
+        label.setFont(label_font)
+        label.setStyleSheet("color: #34495e;")
+        grid.addWidget(label, row, col)
         
-        value_label = QLabel(str(value) if value is not None else "No especificado")
-        value_label.setWordWrap(True)
-        
-        if span > 1:
-            layout.addWidget(value_label, row, col_offset + 1, 1, span)
+        # Formatear valor
+        if value is None or str(value).strip() == '':
+            value_text = "No especificado"
+            value_style = "color: #95a5a6; font-style: italic;"
         else:
-            layout.addWidget(value_label, row, col_offset + 1)
+            value_text = str(value)
+            value_style = "color: #2c3e50;"
+        
+        value_label = QLabel(value_text)
+        value_label.setWordWrap(True)
+        value_label.setStyleSheet(value_style)
+        value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        grid.addWidget(value_label, row, col + 1)
+    
+    def add_section_title(self, grid, row, title_text):
+        """Agrega un título de sección que ocupa todas las columnas"""
+        title = QLabel(title_text)
+        title_font = QFont()
+        title_font.setBold(True)
+        title_font.setPointSize(10)
+        title.setFont(title_font)
+        title.setStyleSheet("""
+            color: #2c3e50; 
+            background-color: #ecf0f1; 
+            padding: 8px; 
+            border-radius: 4px;
+            margin-top: 10px;
+        """)
+        grid.addWidget(title, row, 0, 1, 4)
+    
+    def add_separator(self, grid, row):
+        """Agrega una línea separadora"""
+        separator = QLabel()
+        separator.setFixedHeight(1)
+        separator.setStyleSheet("background-color: #bdc3c7; margin: 10px 0;")
+        grid.addWidget(separator, row, 0, 1, 4)
     
     def format_date(self, date_value):
         """Formatea una fecha"""
@@ -311,7 +443,7 @@ class DetalleAfiliadoDialog(QDialog):
                 return date_value.strftime('%d/%m/%Y')
             else:
                 return str(date_value)
-        except:
+        except Exception:
             return str(date_value)
     
     def format_datetime(self, datetime_value):
@@ -324,5 +456,5 @@ class DetalleAfiliadoDialog(QDialog):
                 return datetime_value.strftime('%d/%m/%Y %H:%M:%S')
             else:
                 return str(datetime_value)
-        except:
+        except Exception:
             return str(datetime_value)
