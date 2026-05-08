@@ -21,6 +21,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from utils.catalogos import get_limitacion_descripcion, get_ambulacion_descripcion
+from utils.pdf_exporter import PDFExporter
 
 
 class DetalleAfiliadoDialog(QDialog):
@@ -80,9 +81,30 @@ class DetalleAfiliadoDialog(QDialog):
         
         main_layout.addWidget(tab_widget)
         
-        # Botón cerrar
+        # Botones
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
+        
+        # Botón Exportar PDF
+        btn_pdf = QPushButton("📄 Exportar PDF")
+        btn_pdf.clicked.connect(self.exportar_pdf)
+        btn_pdf.setMinimumWidth(140)
+        btn_pdf.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                font-weight: bold;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+        """)
+        btn_layout.addWidget(btn_pdf)
+        
+        # Botón Cerrar
         btn_cerrar = QPushButton("✖ Cerrar")
         btn_cerrar.clicked.connect(self.accept)
         btn_cerrar.setMinimumWidth(120)
@@ -458,3 +480,8 @@ class DetalleAfiliadoDialog(QDialog):
                 return str(datetime_value)
         except Exception:
             return str(datetime_value)
+    
+    def exportar_pdf(self):
+        """Exporta la información del afiliado a PDF"""
+        exporter = PDFExporter()
+        exporter.export_afiliado(self.afiliado, self)

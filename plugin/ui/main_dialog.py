@@ -16,7 +16,9 @@ from qgis.PyQt.QtWidgets import (
     QLineEdit,
     QDateEdit,
     QGridLayout,
-    QComboBox
+    QComboBox,
+    QMenu,
+    QAction
 )
 from qgis.PyQt.QtCore import Qt, QDate
 from qgis.PyQt.QtGui import QColor
@@ -43,6 +45,7 @@ from ..modules.centros_interes_manager import (
     search_centros_interes,
     get_centro_by_id
 )
+from ..utils.pdf_exporter import PDFExporter
 
 
 class MainDialog(QDialog):
@@ -206,6 +209,10 @@ class MainDialog(QDialog):
         self.table_all.setSelectionMode(QTableWidget.SingleSelection)
         self.table_all.setEditTriggers(QTableWidget.NoEditTriggers)
         
+        # Menú contextual
+        self.table_all.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table_all.customContextMenuRequested.connect(self.mostrar_menu_contextual_afiliado)
+        
         # Ajustar columnas
         header = self.table_all.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -284,6 +291,10 @@ class MainDialog(QDialog):
         self.table_unlocated.setSelectionBehavior(QTableWidget.SelectRows)
         self.table_unlocated.setSelectionMode(QTableWidget.SingleSelection)
         self.table_unlocated.setEditTriggers(QTableWidget.NoEditTriggers)
+        
+        # Menú contextual
+        self.table_unlocated.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table_unlocated.customContextMenuRequested.connect(self.mostrar_menu_contextual_afiliado)
         
         # Ajustar columnas
         header = self.table_unlocated.horizontalHeader()
@@ -623,6 +634,72 @@ class MainDialog(QDialog):
         from .detalle_afiliado_dialog import DetalleAfiliadoDialog
         dialog = DetalleAfiliadoDialog(afiliado, self)
         dialog.exec_()
+    
+    def mostrar_menu_contextual_afiliado(self, position):
+        """Muestra menú contextual para afiliados"""
+        # Determinar qué tabla disparó el evento
+        sender = self.sender()
+        
+        # Verificar si hay una fila seleccionada
+        if not sender.selectionModel().selectedRows():
+            return
+        
+        # Crear menú
+        menu = QMenu()
+        
+        # Acción: Ver detalles
+        action_detalles = QAction("📋 Ver Detalles", self)
+        action_detalles.triggered.connect(lambda: self.ver_detalles_desde_menu(sender))
+        menu.addAction(action_detalles)
+        
+        # Acción: Exportar PDF
+        action_pdf = QAction("📄 Exportar a PDF", self)
+        action_pdf.triggered.connect(lambda: self.exportar_afiliado_pdf(sender))
+        menu.addAction(action_pdf)
+        
+        # Mostrar menú en la posición del cursor
+        menu.exec_(sender.viewport().mapToGlobal(position))
+    
+    def ver_detalles_desde_menu(self, tabla):
+        """Abre detalles del afiliado desde menú contextual"""
+        selected_rows = tabla.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+        
+        row = selected_rows[0].row()
+        afiliado_id = int(tabla.item(row, 0).text())
+        
+        # Obtener detalles completos
+        afiliado = get_afiliado_by_id(afiliado_id)
+        
+        if not afiliado:
+            QMessageBox.critical(self, "Error", "No se pudo cargar los detalles del afiliado")
+            return
+        
+        # Mostrar diálogo
+        from .detalle_afiliado_dialog import DetalleAfiliadoDialog
+        dialog = DetalleAfiliadoDialog(afiliado, self)
+        dialog.exec_()
+    
+    def exportar_afiliado_pdf(self, tabla):
+        """Exporta afiliado a PDF desde menú contextual"""
+        selected_rows = tabla.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+        
+        row = selected_rows[0].row()
+        afiliado_id = int(tabla.item(row, 0).text())
+        
+        # Obtener detalles completos
+        afiliado = get_afiliado_by_id(afiliado_id)
+        
+        if not afiliado:
+            QMessageBox.critical(self, "Error", "No se pudo cargar los detalles del afiliado")
+            return
+        
+        # Exportar a PDF
+        exporter = PDFExporter()
+        exporter.export_afiliado(afiliado, self)
     
     def ubicar_afiliado_desde_gestion(self):
         """Activa el modo de ubicar afiliado desde la pestaña de gestión"""
