@@ -1028,8 +1028,8 @@ class MainDialog(QDialog):
             print("[PLUGIN] Configuración de BD actualizada")
     
     def importar_desde_access(self):
-        """Importa datos desde un archivo Access"""
-        from qgis.PyQt.QtWidgets import QInputDialog
+        """Importa datos desde un archivo Access con soporte para contraseñas"""
+        from qgis.PyQt.QtWidgets import QInputDialog, QLineEdit
         
         # Abrir diálogo para seleccionar archivo
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1044,153 +1044,117 @@ class MainDialog(QDialog):
         
         print(f"[PLUGIN] Archivo seleccionado: {file_path}")
         
-        # Conectar y listar tablas
+        # Intentar conexión sin contraseña primero
         importer = AccessImporter(file_path)
+        password = None
+        
+        # Intentar conectar para verificar si necesita contraseña
         success, msg = importer.connect_to_access()
         
+        # Si falla, verificar si es por contraseña
         if not success:
-            QMessageBox.critical(
-                self,
-                "Error de Conexión",
-                f"No se pudo conectar a la base de datos Access:\n\n{msg}\n\n"
-                "Verifica que tengas instalado el controlador ODBC de Microsoft Access."
-            )
-            return
-        
-        # Obtener tablas disponibles
-        success, tables = importer.get_tables()
-        
-        if not success:
-            QMessageBox.critical(self, "Error", f"No se pudo listar las tablas:\n{tables}")
-            importer.close()
-            return
-        
-        if not tables:
-            QMessageBox.warning(self, "Sin Tablas", "No se encontraron tablas en la base de datos")
-            importer.close()
-            return
-        
-        # Seleccionar tabla
-        table_name = 'ACLIFIM'
-        
-        if 'ACLIFIM' not in tables:
-            # Buscar tablas con "ACLIFIM" en el nombre (mayúsculas/minúsculas)
-            aclifim_tables = [t for t in tables if 'ACLIFIM' in t.upper()]
-            
-            if len(aclifim_tables) == 1:
-                # Si solo hay una tabla con ACLIFIM en el nombre, usarla automáticamente
-                table_name = aclifim_tables[0]
-                print(f"[PLUGIN] Tabla ACLIFIM encontrada con nombre: {table_name}")
-            else:
-                # Ordenar tablas: primero las que contienen ACLIFIM, luego las demás
-                sorted_tables = aclifim_tables + [t for t in tables if t not in aclifim_tables]
-                
-                # Preguntar al usuario qué tabla usar
-                table_name, ok = QInputDialog.getItem(
+            msg_lower = msg.lower()
+            if "password" in msg_lower or "contraseña" in msg_lower or "cannot open" in msg_lower:
+                # Pedir contraseña al usuario
+                password, ok = QInputDialog.getText(
                     self,
-                    "Seleccionar Tabla",
-                    f"No se encontró tabla 'ACLIFIM' exacta.\n\n"
-                    f"Se encontraron {len(tables)} tablas.\n"
-                    f"Selecciona la tabla de afiliados:",
-                    sorted_tables,
-                    0,
-                    False
+                    "Contraseña Requerida",
+                    "La base de datos Access está protegida con contraseña.\n\n"
+                    "Ingrese la contraseña:",
+                    QLineEdit.Password
                 )
                 
-                if not ok:
+                if not ok or not password:
                     importer.close()
                     return
-        else:
-            print(f"[PLUGIN] Usando tabla ACLIFIM")
+                
+                # Reintentar con contraseña
+                success, msg = importer.connect_to_access(password=password)
+                
+                if not success:
+                    QMessageBox.critical(
+                        self,
+                        "Error de Conexión",
+                        f"No se pudo conectar con la contraseña proporcionada:\n\n{msg}\n\n"
+                        "Verifica que:\n"
+                        "• La contraseña sea correcta\n"
+                        "• Tengas instalado el controlador ODBC de Microsoft Access\n"
+                        "• La base de datos no esté corrupta"
+                    )
+                    importer.close()
+                    return
+            else:
+                # Error diferente (no relacionado con contraseña)
+                QMessageBox.critical(
+                    self,
+                    "Error de Conexión",
+                    f"No se pudo conectar a la base de datos Access:\n\n{msg}\n\n"
+                    "Verifica que tengas instalado el controlador ODBC de Microsoft Access.\n"
+                    "Consulta TROUBLESHOOTING.md para más ayuda."
+                )
+                importer.close()
+                return
         
-        print(f"[PLUGIN] Tabla seleccionada: {table_name}")
+        # Cerrar la conexión de prueba
+        importer.close()
         
-        # Crear diálogo de progreso (inicialmente indeterminado)
-        progress = QProgressDialog("Leyendo datos desde Access...", "Cancelar", 0, 0, self)
+        # Ahora usar el método automático completo con la contraseña (si la hay)
+        print(f"[PLUGIN] Iniciando importación automática{' con contraseña' if password else ''}...")
+        
+        # Crear diálogo de progreso
+        progress = QProgressDialog("Conectando a Access...", "Cancelar", 0, 5, self)
         progress.setWindowModality(Qt.WindowModal)
         progress.setAutoClose(False)
         progress.setAutoReset(False)
-        progress.setMinimumWidth(450)  # Ancho fijo
-        progress.setFixedHeight(120)   # Alto fijo
+        progress.setMinimumWidth(450)
+        progress.setFixedHeight(120)
         progress.show()
         
-        # Leer afiliados
-        success, data = importer.get_afiliados_from_access(table_name)
-        
-        if not success:
-            progress.close()
-            QMessageBox.critical(
-                self,
-                "Error al Leer Datos",
-                f"No se pudieron leer los datos de la tabla:\n\n{data}"
-            )
-            importer.close()
-            return
-        
-        afiliados = data
-        
-        if len(afiliados) == 0:
-            progress.close()
-            QMessageBox.warning(
-                self,
-                "Sin Datos",
-                "No se encontraron registros en la tabla seleccionada"
-            )
-            importer.close()
-            return
-        
-        # Configurar progreso determinado
-        total = len(afiliados)
-        progress.setMaximum(total)
-        progress.setValue(0)
-        progress.setLabelText(f"Sincronizando {total} afiliados con PostgreSQL...")
-        
         # Variable para controlar cancelación
-        cancelled = [False]  # Usar lista para modificar en función interna
+        cancelled = [False]
         
         # Función callback para actualizar progreso
         def update_progress(current, total, message):
             if progress.wasCanceled():
                 cancelled[0] = True
-                raise Exception("Sincronización cancelada por el usuario")
+                raise Exception("Importación cancelada por el usuario")
+            progress.setMaximum(total)
             progress.setValue(current)
-            percentage = int((current / total) * 100)
-            progress.setLabelText(f"{message}\n\nProgreso: {percentage}%")
+            progress.setLabelText(message)
             # Procesar eventos para que la UI se actualice
             from qgis.PyQt.QtWidgets import QApplication
             QApplication.processEvents()
         
-        # Sincronizar con PostgreSQL con callback de progreso
+        # Ejecutar importación automática
+        importer = AccessImporter(file_path)
         try:
-            success, result = importer.synchronize_with_postgresql(afiliados, progress_callback=update_progress)
+            success, result = importer.auto_detect_and_import(
+                password=password,
+                progress_callback=update_progress
+            )
         except Exception as e:
+            progress.close()
             if cancelled[0]:
-                progress.close()
-                importer.close()
                 QMessageBox.information(
                     self,
-                    "Sincronización Cancelada",
-                    "La sincronización fue cancelada por el usuario."
+                    "Importación Cancelada",
+                    "La importación fue cancelada por el usuario."
                 )
-                return
             else:
-                progress.close()
-                importer.close()
                 QMessageBox.critical(
                     self,
                     "Error",
-                    f"Error durante la sincronización:\n{str(e)}"
+                    f"Error durante la importación:\n\n{str(e)}"
                 )
-                return
+            return
         
         progress.close()
-        importer.close()
         
         if success:
             # Mostrar estadísticas
             stats = result
             mensaje = (
-                f"✅ Sincronización completada exitosamente\n\n"
+                f"✅ Importación completada exitosamente\n\n"
                 f"📊 Estadísticas:\n"
                 f"  • Nuevos: {stats['nuevos']}\n"
                 f"  • Actualizados: {stats['actualizados']}\n"
@@ -1207,20 +1171,20 @@ class MainDialog(QDialog):
             
             QMessageBox.information(
                 self,
-                "Sincronización Exitosa",
+                "Importación Exitosa",
                 mensaje
             )
-            print(f"[PLUGIN] Sincronización exitosa: {stats}")
+            print(f"[PLUGIN] Importación exitosa: {stats}")
             
             # Actualizar tabla
             self.load_all_afiliados()
         else:
             QMessageBox.critical(
                 self,
-                "Error en Sincronización",
-                f"No se pudo sincronizar con PostgreSQL:\n\n{result}"
+                "Error en Importación",
+                f"No se pudo completar la importación:\n\n{result}"
             )
-            print(f"[PLUGIN] Error en sincronización: {result}")
+            print(f"[PLUGIN] Error en importación: {result}")
     
     # ============================================================
     # MÉTODOS PARA GESTIÓN DE CENTROS DE INTERÉS

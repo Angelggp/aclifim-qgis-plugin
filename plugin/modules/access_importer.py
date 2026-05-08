@@ -29,31 +29,104 @@ class AccessImporter:
         self.access_file_path = access_file_path
         self.connection = None
     
-    def connect_to_access(self):
+    def connect_to_access(self, password=None):
         """
-        Conecta a la base de datos Access
+        Conecta a la base de datos Access con detección automática de drivers.
+        Soporta bases de datos protegidas con contraseña.
+        
+        Args:
+            password: contraseña de la base de datos (opcional)
+        
         Retorna: (bool, str) - (éxito, mensaje)
         """
         try:
-            # Detectar si es .mdb o .accdb
-            if self.access_file_path.endswith('.accdb'):
-                driver = '{Microsoft Access Driver (*.mdb, *.accdb)}'
-            else:
-                driver = '{Microsoft Access Driver (*.mdb)}'
+            # 1. DETECTAR DRIVERS DISPONIBLES
+            drivers_disponibles = [d for d in pyodbc.drivers() 
+                                  if 'Access' in d or 'accdb' in d.lower() or 'mdb' in d.lower()]
             
-            conn_str = f'DRIVER={driver};DBQ={self.access_file_path}'
-            self.connection = pyodbc.connect(conn_str)
+            if not drivers_disponibles:
+                error_detallado = (
+                    "❌ NO SE ENCONTRÓ EL DRIVER ODBC DE MICROSOFT ACCESS\n\n"
+                    "El sistema necesita el controlador ODBC de Access para conectarse a bases de datos .mdb/.accdb.\n\n"
+                    "SOLUCIÓN:\n"
+                    "1. Descarga e instala 'Microsoft Access Database Engine 2016 Redistributable'\n"
+                    "2. Link de descarga: https://www.microsoft.com/en-us/download/details.aspx?id=54920\n"
+                    "3. Elige la versión que coincida con tu Python (64-bit recomendado)\n"
+                    "4. Si da error de compatibilidad, instala con: AccessDatabaseEngine.exe /quiet\n\n"
+                    "NOTAS IMPORTANTES:\n"
+                    "- La instalación es GRATUITA y oficial de Microsoft\n"
+                    "- NO necesitas comprar Microsoft Access\n"
+                    "- Si tienes Office instalado, instala la misma versión (32 o 64 bits)\n\n"
+                    "Para más ayuda, consulta el archivo TROUBLESHOOTING.md"
+                )
+                print(f"[IMPORTADOR] {error_detallado}")
+                return False, error_detallado
             
-            # Configurar decodificación para manejar caracteres especiales en español
-            # Access usa Windows-1252 (CP1252) en lugar de UTF-8
-            self.connection.setdecoding(pyodbc.SQL_CHAR, encoding='cp1252')
-            self.connection.setdecoding(pyodbc.SQL_WCHAR, encoding='cp1252')
-            self.connection.setencoding(encoding='cp1252')
+            # Usar el primer driver disponible
+            driver = drivers_disponibles[0]
+            print(f"[IMPORTADOR] Driver detectado: {driver}")
             
-            print(f"[IMPORTADOR] Conectado a Access: {self.access_file_path}")
-            return True, "Conexión exitosa a Access"
+            # 2. CONSTRUIR CADENA DE CONEXIÓN
+            base_conn = f'DRIVER={{{driver}}};DBQ={self.access_file_path};'
+            
+            # Si no hay contraseña, intentar conexión directa
+            if not password:
+                try:
+                    self.connection = pyodbc.connect(base_conn)
+                    # Configurar codificación (latin-1 acepta todos los bytes 0x00-0xFF sin errores)
+                    self.connection.setdecoding(pyodbc.SQL_CHAR, encoding='latin-1')
+                    self.connection.setdecoding(pyodbc.SQL_WCHAR, encoding='utf-16-le')
+                    self.connection.setencoding(encoding='utf-8')
+                    print(f"[IMPORTADOR] ✅ Conectado a Access: {self.access_file_path}")
+                    return True, "Conexión exitosa a Access"
+                except pyodbc.Error as e:
+                    # Si falla por contraseña, informar al usuario
+                    if "password" in str(e).lower() or "cannot open" in str(e).lower():
+                        return False, (
+                            "La base de datos está protegida con contraseña.\n"
+                            "Por favor, proporciona la contraseña para acceder."
+                        )
+                    raise
+            
+            # 3. INTENTAR CON CONTRASEÑA (probar múltiples métodos)
+            print("[IMPORTADOR] Intentando conectar con contraseña...")
+            intentos = [
+                ('PWD', base_conn + f'PWD={password};'),
+                ('UID+PWD', base_conn + f'UID=Admin;PWD={password};'),
+                ('Database Password', base_conn + f'Database Password={password};'),
+            ]
+            
+            ultimo_error = None
+            for metodo, conn_str in intentos:
+                try:
+                    print(f"[IMPORTADOR] Probando método: {metodo}")
+                    self.connection = pyodbc.connect(conn_str)
+                    
+                    # Configurar codificación (latin-1 es más seguro para bases antiguas)
+                    self.connection.setdecoding(pyodbc.SQL_CHAR, encoding='latin-1')
+                    self.connection.setdecoding(pyodbc.SQL_WCHAR, encoding='utf-16-le')
+                    self.connection.setencoding(encoding='utf-8')
+                    
+                    print(f"[IMPORTADOR] ✅ Conectado usando método: {metodo}")
+                    return True, f"Conexión exitosa (método: {metodo})"
+                    
+                except pyodbc.Error as e:
+                    ultimo_error = str(e)
+                    print(f"[IMPORTADOR] ❌ Falló {metodo}: {e}")
+                    continue
+            
+            # Si todos fallaron
+            return False, (
+                f"No se pudo conectar con la contraseña proporcionada.\n\n"
+                f"Error: {ultimo_error}\n\n"
+                f"Verifica que:\n"
+                f"1. La contraseña sea correcta\n"
+                f"2. La base de datos no esté corrupta\n"
+                f"3. Tengas permisos de lectura en el archivo"
+            )
+            
         except pyodbc.Error as e:
-            error_msg = f"Error al conectar a Access: {str(e)}"
+            error_msg = f"Error ODBC al conectar a Access:\n{str(e)}\n\nConsulta TROUBLESHOOTING.md para más ayuda."
             print(f"[IMPORTADOR] {error_msg}")
             return False, error_msg
         except Exception as e:
@@ -131,6 +204,138 @@ class AccessImporter:
             error_msg = f"Error al obtener columnas: {str(e)}"
             print(f"[IMPORTADOR] {error_msg}")
             return False, error_msg
+    
+    def _safe_decode(self, value, field_name=''):
+        """
+        Decodifica valores con manejo robusto de múltiples codificaciones.
+        Previene errores como 'charmap' codec can't decode byte 0x81.
+        
+        Args:
+            value: valor a decodificar (puede ser bytes o str)
+            field_name: nombre del campo (para logging)
+        
+        Retorna: str decodificado de forma segura
+        """
+        if value is None:
+            return ''
+        
+        # Si ya es string, solo limpiarlo
+        if isinstance(value, str):
+            return value.strip()
+        
+        # Si es bytes, intentar múltiples codificaciones
+        if isinstance(value, bytes):
+            # Intentar codificaciones en orden de probabilidad
+            encodings = ['utf-8', 'latin-1', 'cp1252', 'cp850', 'iso-8859-1']
+            
+            for encoding in encodings:
+                try:
+                    decoded = value.decode(encoding, errors='strict')
+                    return decoded.strip()
+                except (UnicodeDecodeError, LookupError):
+                    continue
+            
+            # Si ninguna funciona, usar latin-1 con reemplazo (nunca falla)
+            # latin-1 acepta todos los bytes del 0x00 al 0xFF
+            try:
+                decoded = value.decode('latin-1', errors='replace')
+                if field_name:
+                    print(f"[IMPORTADOR] Warning: Usando latin-1 con reemplazo para '{field_name}'")
+                return decoded.strip()
+            except Exception as e:
+                print(f"[IMPORTADOR] Error crítico decodificando '{field_name}': {e}")
+                return ''
+        
+        # Para otros tipos, convertir a string
+        try:
+            return str(value).strip()
+        except Exception as e:
+            print(f"[IMPORTADOR] Error convirtiendo '{field_name}' a string: {e}")
+            return ''
+    
+    def auto_detect_and_import(self, password=None, progress_callback=None):
+        """
+        Proceso completo automático de importación:
+        1. Conecta a Access (con o sin contraseña)
+        2. Busca automáticamente la tabla ACLIFIM (o variaciones)
+        3. Lee los datos
+        4. Sincroniza con PostgreSQL
+        
+        Args:
+            password: contraseña de la base de datos (opcional)
+            progress_callback: función(current, total, message) para reportar progreso
+        
+        Retorna: (bool, dict/str) - (éxito, estadísticas o mensaje de error)
+        """
+        TABLE_PRINCIPAL = 'ACLIFIM'
+        
+        # 1. Conectar a Access
+        if progress_callback:
+            progress_callback(0, 5, "Conectando a la base de datos Access...")
+        
+        success, msg = self.connect_to_access(password=password)
+        if not success:
+            return False, msg
+        
+        # 2. Buscar tabla ACLIFIM automáticamente
+        if progress_callback:
+            progress_callback(1, 5, "Buscando tabla de afiliados...")
+        
+        success, tables = self.get_tables()
+        if not success:
+            self.close()
+            return False, tables
+        
+        tabla_objetivo = None
+        
+        # Buscar exacta primero
+        if TABLE_PRINCIPAL in tables:
+            tabla_objetivo = TABLE_PRINCIPAL
+            print(f"[IMPORTADOR] ✅ Tabla '{TABLE_PRINCIPAL}' encontrada automáticamente")
+        else:
+            # Buscar variaciones (ACLIFIM2, aclifim, etc.)
+            variaciones = [t for t in tables if TABLE_PRINCIPAL in t.upper()]
+            if variaciones:
+                tabla_objetivo = variaciones[0]
+                print(f"[IMPORTADOR] ⚠️ Usando variación: '{tabla_objetivo}'")
+            else:
+                self.close()
+                tablas_str = ', '.join(tables[:10])  # Mostrar primeras 10
+                if len(tables) > 10:
+                    tablas_str += f"... (y {len(tables) - 10} más)"
+                return False, (
+                    f"No se encontró la tabla '{TABLE_PRINCIPAL}' en la base de datos.\n\n"
+                    f"Tablas disponibles: {tablas_str}\n\n"
+                    f"Verifica que la base de datos sea la correcta."
+                )
+        
+        # 3. Leer datos
+        if progress_callback:
+            progress_callback(2, 5, f"Leyendo datos de '{tabla_objetivo}'...")
+        
+        success, data = self.get_afiliados_from_access(tabla_objetivo)
+        if not success:
+            self.close()
+            return False, data
+        
+        if len(data) == 0:
+            self.close()
+            return False, f"La tabla '{tabla_objetivo}' no tiene registros."
+        
+        print(f"[IMPORTADOR] {len(data)} registros leídos desde Access")
+        
+        # 4. Sincronizar con PostgreSQL
+        if progress_callback:
+            progress_callback(3, 5, "Sincronizando con PostgreSQL...")
+        
+        success, result = self.synchronize_with_postgresql(data, progress_callback=progress_callback)
+        
+        # 5. Cerrar conexión
+        if progress_callback:
+            progress_callback(5, 5, "Proceso completado")
+        
+        self.close()
+        return success, result
     
     def get_afiliados_from_access(self, table_name='ACLIFIM'):
         """
@@ -278,17 +483,8 @@ class AccessImporter:
                             elif field_key in ['fecha_nacimiento', 'fecha_ingreso', 'fecha_alta', 'fecha_baja']:
                                 afiliado[field_key] = value  # Dejar como está (fecha)
                             else:
-                                # Convertir a string manejando posibles errores de codificación
-                                try:
-                                    if isinstance(value, bytes):
-                                        # Si es bytes, decodificar como cp1252
-                                        afiliado[field_key] = value.decode('cp1252', errors='replace').strip()
-                                    else:
-                                        afiliado[field_key] = str(value).strip()
-                                except Exception as conv_error:
-                                    # Fallback: usar representación segura
-                                    print(f"[IMPORTADOR] Warning: Error convirtiendo '{field_key}': {conv_error}")
-                                    afiliado[field_key] = repr(value).strip()
+                                # Convertir a string con manejo robusto de codificación
+                                afiliado[field_key] = self._safe_decode(value, field_key)
                     except Exception as e:
                         print(f"[IMPORTADOR] Error procesando campo '{field_key}': {e}")
                         continue
@@ -549,13 +745,20 @@ class AccessImporter:
             self.connection.close()
             print("[IMPORTADOR] Conexión a Access cerrada")
     
-    def import_full_process(self, table_name='ACLIFIM'):
+    def import_full_process(self, table_name='ACLIFIM', password=None, progress_callback=None):
         """
-        Proceso completo de sincronización con Access
+        Proceso completo de sincronización con Access.
+        NOTA: Se recomienda usar auto_detect_and_import() en su lugar.
+        
+        Args:
+            table_name: nombre de la tabla (por defecto 'ACLIFIM')
+            password: contraseña de la base de datos (opcional)
+            progress_callback: función(current, total, message) para reportar progreso
+        
         Retorna: (bool, dict/str) - (éxito, estadísticas o mensaje)
         """
         # 1. Conectar a Access
-        success, msg = self.connect_to_access()
+        success, msg = self.connect_to_access(password=password)
         if not success:
             return False, msg
         
@@ -571,7 +774,7 @@ class AccessImporter:
             return False, "No se encontraron registros en la tabla"
         
         # 3. Sincronizar con PostgreSQL
-        success, result = self.synchronize_with_postgresql(afiliados)
+        success, result = self.synchronize_with_postgresql(afiliados, progress_callback=progress_callback)
         
         # 4. Cerrar conexión
         self.close()
