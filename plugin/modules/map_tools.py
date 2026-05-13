@@ -97,6 +97,49 @@ def get_or_create_layer():
         return None
 
 
+def force_reload_afiliados_layer():
+    """
+    Elimina y recarga completamente la capa de afiliados desde PostGIS.
+    Es la forma más fiable de que los cambios en la BD aparezcan en el mapa.
+    Preserva el estilo de la capa si existe.
+    """
+    from qgis.PyQt.QtXml import QDomDocument
+    from qgis.utils import iface as qgis_iface
+
+    layer_name = "Afiliados"
+    style_xml = None
+
+    # Guardar estilo y recoger ID de la capa a eliminar
+    layer_id_to_remove = None
+    for layer_id, layer in list(QgsProject.instance().mapLayers().items()):
+        if layer.name() == layer_name:
+            doc = QDomDocument()
+            layer.exportNamedStyle(doc)
+            style_xml = doc.toString()
+            layer_id_to_remove = layer_id
+            break
+
+    if layer_id_to_remove:
+        QgsProject.instance().removeMapLayer(layer_id_to_remove)
+        print(f"[PLUGIN] Capa '{layer_name}' eliminada para recarga completa")
+
+    # Recargar desde PostGIS (conexión fresca)
+    new_layer = get_or_create_layer()
+
+    # Restaurar estilo previo
+    if new_layer and style_xml:
+        doc = QDomDocument()
+        doc.setContent(style_xml)
+        new_layer.importNamedStyle(doc)
+        new_layer.triggerRepaint()
+
+    if new_layer:
+        qgis_iface.mapCanvas().refresh()
+        print(f"[PLUGIN] Capa '{layer_name}' recargada: {new_layer.featureCount()} features")
+
+    return new_layer
+
+
 def add_test_point(iface):
     layer = get_or_create_layer()
     point = QgsPointXY(-80.456, 22.149)

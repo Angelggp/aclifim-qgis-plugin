@@ -18,7 +18,7 @@ from qgis.core import QgsWkbTypes, QgsCoordinateTransform, QgsProject, QgsCoordi
 from qgis.PyQt.QtGui import QColor
 
 from ..modules.access_importer import get_afiliados_sin_coordenadas, update_afiliado_coordinates
-from ..modules.map_tools import MapClickTool
+from ..modules.map_tools import MapClickTool, force_reload_afiliados_layer
 
 
 class AfiliadosSinUbicarDialog(QDialog):
@@ -49,7 +49,7 @@ class AfiliadosSinUbicarDialog(QDialog):
         # Tabla de afiliados
         self.table = QTableWidget()
         self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["ID", "Nombre", "Dirección", "Municipio"])
+        self.table.setHorizontalHeaderLabels(["ID", "Nombre", "Dirección", "Carnet ID"])
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -103,10 +103,11 @@ class AfiliadosSinUbicarDialog(QDialog):
             row = self.table.rowCount()
             self.table.insertRow(row)
             
+            nombre_completo = f"{afiliado.get('nombres', '')} {afiliado.get('apellidos', '')}".strip()
             self.table.setItem(row, 0, QTableWidgetItem(str(afiliado['id'])))
-            self.table.setItem(row, 1, QTableWidgetItem(afiliado['nombre']))
-            self.table.setItem(row, 2, QTableWidgetItem(afiliado['direccion']))
-            self.table.setItem(row, 3, QTableWidgetItem(afiliado['municipio']))
+            self.table.setItem(row, 1, QTableWidgetItem(nombre_completo))
+            self.table.setItem(row, 2, QTableWidgetItem(afiliado.get('direccion', '')))
+            self.table.setItem(row, 3, QTableWidgetItem(afiliado.get('carnet_id', '')))
     
     def on_selection_changed(self):
         """Maneja el cambio de selección en la tabla"""
@@ -214,12 +215,6 @@ class AfiliadosSinUbicarDialog(QDialog):
         self.activateWindow()
     
     def refresh_layer(self):
-        """Refresca la capa de Afiliados en QGIS para mostrar el nuevo punto"""
-        from qgis.core import QgsProject
-        
-        for layer in QgsProject.instance().mapLayers().values():
-            if "Afiliados" in layer.name() or "afiliados" in layer.name().lower():
-                layer.triggerRepaint()
-                print("[SIN UBICAR] Capa de afiliados refrescada")
-        
-        self.iface.mapCanvas().refresh()
+        """Recarga completamente la capa de Afiliados para mostrar el nuevo punto"""
+        force_reload_afiliados_layer()
+        print("[SIN UBICAR] Capa de afiliados recargada")

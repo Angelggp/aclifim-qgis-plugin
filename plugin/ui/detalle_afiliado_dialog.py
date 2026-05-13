@@ -11,7 +11,8 @@ from qgis.PyQt.QtWidgets import (
     QGridLayout,
     QScrollArea,
     QWidget,
-    QTabWidget
+    QTabWidget,
+    QMessageBox
 )
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtGui import QFont
@@ -22,14 +23,18 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from utils.catalogos import get_limitacion_descripcion, get_ambulacion_descripcion
 from utils.pdf_exporter import PDFExporter
+from .cambio_direccion_dialog import CambioDireccionDialog
+from ..modules.access_importer import cambiar_direccion_afiliado
 
 
 class DetalleAfiliadoDialog(QDialog):
     """Muestra todos los detalles de un afiliado con diseño de pestañas y dos columnas"""
     
-    def __init__(self, afiliado, parent=None):
+    def __init__(self, afiliado, parent=None, iface=None):
         super().__init__(parent)
         self.afiliado = afiliado
+        self.iface = iface
+        self.parent_dialog = parent
         nombre_completo = f"{afiliado.get('nombres', '')} {afiliado.get('apellidos', '')}".strip()
         self.setWindowTitle(f"📋 Detalles del Afiliado - {nombre_completo or 'Sin nombre'}")
         self.resize(800, 700)
@@ -84,6 +89,29 @@ class DetalleAfiliadoDialog(QDialog):
         # Botones
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
+        
+        # Botón Cambiar Dirección (solo si tiene coordenadas)
+        lon = self.afiliado.get('lon')
+        lat = self.afiliado.get('lat')
+        
+        if lon is not None and lat is not None:
+            btn_cambiar_dir = QPushButton("📍 Cambiar Dirección")
+            btn_cambiar_dir.clicked.connect(self.cambiar_direccion)
+            btn_cambiar_dir.setMinimumWidth(160)
+            btn_cambiar_dir.setStyleSheet("""
+                QPushButton {
+                    background-color: #FF9800;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    font-weight: bold;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: #F57C00;
+                }
+            """)
+            btn_layout.addWidget(btn_cambiar_dir)
         
         # Botón Exportar PDF
         btn_pdf = QPushButton("📄 Exportar PDF")
@@ -485,3 +513,52 @@ class DetalleAfiliadoDialog(QDialog):
         """Exporta la información del afiliado a PDF"""
         exporter = PDFExporter()
         exporter.export_afiliado(self.afiliado, self)
+    
+    def cambiar_direccion(self):
+        """Inicia el proceso de cambio de dirección del afiliado"""
+        nombre_completo = f"{self.afiliado.get('nombres', '')} {self.afiliado.get('apellidos', '')}" .strip()
+        
+        # Mostrar diálogo de confirmación
+        dialog = CambioDireccionDialog(nombre_completo, self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            motivo = dialog.get_motivo()
+            afiliado_id = self.afiliado.get('id')
+            
+            # Llamar a la función que elimina geometría y cambia estado
+            success, msg = cambiar_direccion_afiliado(afiliado_id, motivo)
+            
+            if success:
+                QMessageBox.information(
+                    self,
+                    "Cambio Registrado",
+                    f"El cambio de dirección se registró correctamente.\n\n"
+                    f"El afiliado '{nombre_completo}' ahora aparecerá en la lista 'Sin Ubicar'.\n"
+                    f"Ubíquelo nuevamente en el mapa desde esa lista."
+                )
+                # Cerrar el diálogo y refrescar si es posible
+                self.accept()
+                # Refrescar datos del padre si es posible
+                if hasattr(self.parent_dialog, 'load_all_afiliados'):
+                    try:
+                        self.parent_dialog.load_all_afiliados()
+                    except Exception as e:
+                        print(f"[DEBUG] Error al recargar afiliados: {e}")
+                
+                if hasattr(self.parent_dialog, 'load_unlocated_afiliados') and hasattr(self.parent_dialog, 'table_unlocated'):
+                    try:
+                        self.parent_dialog.load_unlocated_afiliados()
+                    except Exception as e:
+                        print(f"[DEBUG] Error al recargar sin ubicar: {e}")
+                
+                if hasattr(self.parent_dialog, 'refresh_layer'):
+                    try:
+                        self.parent_dialog.refresh_layer()
+                    except Exception as e:
+                        print(f"[DEBUG] Error al refrescar capa: {e}")
+            else:
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"No se pudo registrar el cambio de dirección:\n\n{msg}"
+                )

@@ -25,7 +25,7 @@ from qgis.PyQt.QtGui import QColor
 from qgis.gui import QgsRubberBand, QgsMapToolEmitPoint
 from qgis.core import QgsWkbTypes, QgsPointXY
 
-from ..modules.map_tools import MapClickTool, add_point_with_data
+from ..modules.map_tools import MapClickTool, add_point_with_data, force_reload_afiliados_layer
 from .afiliado_form import AfiliadoForm
 from .db_config_dialog import DatabaseConfigDialog
 from .centro_interes_form import CentroInteresForm
@@ -632,7 +632,7 @@ class MainDialog(QDialog):
         
         # Mostrar diálogo de detalles
         from .detalle_afiliado_dialog import DetalleAfiliadoDialog
-        dialog = DetalleAfiliadoDialog(afiliado, self)
+        dialog = DetalleAfiliadoDialog(afiliado, self, self.iface)
         dialog.exec_()
     
     def mostrar_menu_contextual_afiliado(self, position):
@@ -647,6 +647,11 @@ class MainDialog(QDialog):
         # Crear menú
         menu = QMenu()
         
+        # Obtener ID del afiliado para verificar si tiene coordenadas
+        row = sender.selectionModel().selectedRows()[0].row()
+        afiliado_id = int(sender.item(row, 0).text())
+        afiliado = get_afiliado_by_id(afiliado_id)
+        
         # Acción: Ver detalles
         action_detalles = QAction("📋 Ver Detalles", self)
         action_detalles.triggered.connect(lambda: self.ver_detalles_desde_menu(sender))
@@ -656,6 +661,13 @@ class MainDialog(QDialog):
         action_pdf = QAction("📄 Exportar a PDF", self)
         action_pdf.triggered.connect(lambda: self.exportar_afiliado_pdf(sender))
         menu.addAction(action_pdf)
+        
+        # Acción: Cambiar Dirección (solo si tiene coordenadas)
+        if afiliado and afiliado.get('lon') is not None and afiliado.get('lat') is not None:
+            menu.addSeparator()
+            action_cambiar_dir = QAction("📍 Cambiar Dirección", self)
+            action_cambiar_dir.triggered.connect(lambda: self.cambiar_direccion_desde_menu(sender))
+            menu.addAction(action_cambiar_dir)
         
         # Mostrar menú en la posición del cursor
         menu.exec_(sender.viewport().mapToGlobal(position))
@@ -678,7 +690,7 @@ class MainDialog(QDialog):
         
         # Mostrar diálogo
         from .detalle_afiliado_dialog import DetalleAfiliadoDialog
-        dialog = DetalleAfiliadoDialog(afiliado, self)
+        dialog = DetalleAfiliadoDialog(afiliado, self, self.iface)
         dialog.exec_()
     
     def exportar_afiliado_pdf(self, tabla):
@@ -700,6 +712,69 @@ class MainDialog(QDialog):
         # Exportar a PDF
         exporter = PDFExporter()
         exporter.export_afiliado(afiliado, self)
+    
+    def cambiar_direccion_desde_menu(self, tabla):
+        """Cambia dirección de afiliado desde menú contextual"""
+        selected_rows = tabla.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+        
+        row = selected_rows[0].row()
+        afiliado_id = int(tabla.item(row, 0).text())
+        
+        # Obtener detalles completos
+        afiliado = get_afiliado_by_id(afiliado_id)
+        
+        if not afiliado:
+            QMessageBox.critical(self, "Error", "No se pudo cargar los detalles del afiliado")
+            return
+        
+        # Verificar que tenga coordenadas
+        if afiliado.get('lon') is None or afiliado.get('lat') is None:
+            QMessageBox.warning(self, "Advertencia", "Este afiliado no tiene coordenadas asignadas")
+            return
+        
+        # Mostrar diálogo de confirmación
+        from .cambio_direccion_dialog import CambioDireccionDialog
+        nombre_completo = f"{afiliado.get('nombres', '')} {afiliado.get('apellidos', '')}" .strip()
+        dialog = CambioDireccionDialog(nombre_completo, self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            motivo = dialog.get_motivo()
+            
+            # Llamar a la función que elimina geometría y cambia estado
+            from ..modules.access_importer import cambiar_direccion_afiliado
+            success, msg = cambiar_direccion_afiliado(afiliado_id, motivo)
+            
+            if success:
+                QMessageBox.information(
+                    self,
+                    "Cambio Registrado",
+                    f"El cambio de dirección se registró correctamente.\n\n"
+                    f"El afiliado '{nombre_completo}' ahora aparecerá en la lista 'Sin Ubicar'.\n"
+                    f"Ubíquelo nuevamente en el mapa desde esa lista."
+                )
+                # Recargar datos y refrescar mapa
+                try:
+                    self.load_all_afiliados()
+                except Exception as e:
+                    print(f"[PLUGIN] Error al recargar afiliados: {e}")
+                
+                try:
+                    self.load_unlocated_afiliados()
+                except Exception as e:
+                    print(f"[PLUGIN] Error al recargar sin ubicar: {e}")
+                
+                try:
+                    self.refresh_layer()
+                except Exception as e:
+                    print(f"[PLUGIN] Error al refrescar capa: {e}")
+            else:
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"No se pudo registrar el cambio de dirección:\n\n{msg}"
+                )
     
     def ubicar_afiliado_desde_gestion(self):
         """Activa el modo de ubicar afiliado desde la pestaña de gestión"""
@@ -758,6 +833,11 @@ class MainDialog(QDialog):
     
     def load_unlocated_afiliados(self):
         """Carga afiliados sin ubicar en la tabla con nuevos campos"""
+        # Verificar que la tabla exista
+        if not hasattr(self, 'table_unlocated'):
+            print("[PLUGIN] tabla_unlocated no existe aún")
+            return
+        
         afiliados = get_afiliados_sin_coordenadas()
         self.table_unlocated.setRowCount(0)
         
@@ -898,6 +978,7 @@ class MainDialog(QDialog):
             if success:
                 QMessageBox.information(self, "Éxito", f"Afiliado '{nombre}' ubicado correctamente")
                 self.load_all_afiliados()
+                self.load_unlocated_afiliados()  # Actualizar lista de sin ubicar
                 self.refresh_layer()
             else:
                 QMessageBox.critical(self, "Error", msg)
@@ -914,27 +995,12 @@ class MainDialog(QDialog):
     def load_afiliados_layer(self):
         """Carga o recarga la capa de afiliados desde PostGIS"""
         try:
-            from ..modules.map_tools import get_or_create_layer
-            layer = get_or_create_layer()
-            
+            layer = force_reload_afiliados_layer()
             if layer:
-                print(f"[PLUGIN] Capa de afiliados cargada: {layer.name()}")
-                print(f"[PLUGIN] Tipo de proveedor: {layer.providerType()}")
-                print(f"[PLUGIN] Features en capa: {layer.featureCount()}")
-                
-                # Si es PostGIS, recargar datos
-                if layer.providerType() == "postgres":
-                    layer.dataProvider().reloadData()
-                    layer.triggerRepaint()
-                    print("[PLUGIN] Datos recargados desde PostGIS")
-                
-                # Refrescar canvas
-                self.iface.mapCanvas().refresh()
-                return layer
+                print(f"[PLUGIN] Capa de afiliados lista: {layer.featureCount()} features")
             else:
                 print("[PLUGIN] No se pudo cargar la capa de afiliados")
-                return None
-                
+            return layer
         except Exception as e:
             print(f"[PLUGIN] Error al cargar capa de afiliados: {e}")
             import traceback
@@ -952,13 +1018,13 @@ class MainDialog(QDialog):
                 print(f"[PLUGIN] Tipo de proveedor: {layer.providerType()}")
                 print(f"[PLUGIN] Features en capa: {layer.featureCount()}")
                 
-                # Si es PostGIS, recargar datos
+                # Si es PostGIS, recargar datos desde la BD
                 if layer.providerType() == "postgres":
                     layer.dataProvider().reloadData()
+                    layer.updateExtents()
                     layer.triggerRepaint()
                     print("[PLUGIN] Datos de centros recargados desde PostGIS")
                 
-                # Refrescar canvas
                 self.iface.mapCanvas().refresh()
                 return layer
             else:

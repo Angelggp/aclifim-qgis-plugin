@@ -950,6 +950,63 @@ def update_afiliado_coordinates(afiliado_id, point):
         return False, error_msg
 
 
+def cambiar_direccion_afiliado(afiliado_id, motivo):
+    """
+    Marca un afiliado para cambio de dirección: elimina su ubicación actual
+    y cambia su estado para que aparezca en la lista de 'Sin Ubicar'
+    
+    Args:
+        afiliado_id: ID del afiliado en la BD
+        motivo: Motivo del cambio ('mudanza', 'correccion', 'otro')
+    
+    Retorna: (bool, str) - (éxito, mensaje)
+    """
+    config = load_db_config()
+    if not config:
+        return False, "No hay configuración de BD"
+    
+    try:
+        conn = psycopg2.connect(
+            host=config['host'],
+            port=config['port'],
+            user=config['user'],
+            password=config['password'],
+            dbname=config['dbname']
+        )
+        cursor = conn.cursor()
+        
+        # Guardar geometría actual en geom_anterior (para historial) y eliminar ubicación
+        # Cambiar estado a 'cambio_direccion'
+        cursor.execute(
+            """
+            UPDATE afiliados 
+            SET geom_anterior = geom,
+                geom = NULL,
+                estado = 'cambio_direccion',
+                fecha_modificacion = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (afiliado_id,)
+        )
+        
+        rows_affected = cursor.rowcount
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        if rows_affected > 0:
+            print(f"[IMPORTADOR] Cambio de dirección registrado para afiliado ID {afiliado_id} (motivo: {motivo})")
+            return True, "Cambio de dirección registrado exitosamente"
+        else:
+            return False, "No se encontró el afiliado especificado"
+        
+    except Exception as e:
+        error_msg = f"Error al registrar cambio de dirección: {str(e)}"
+        print(f"[IMPORTADOR] {error_msg}")
+        return False, error_msg
+
+
 def get_afiliado_by_id(afiliado_id):
     """
     Obtiene los detalles completos de un afiliado por ID
