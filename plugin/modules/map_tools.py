@@ -140,6 +140,91 @@ def force_reload_afiliados_layer():
     return new_layer
 
 
+def highlight_afiliados_by_ids(afiliado_ids, zoom_to_selection=False):
+    """
+    Resalta afiliados en el mapa usando selección de la capa.
+
+    Args:
+        afiliado_ids: lista de IDs de afiliados a resaltar.
+        zoom_to_selection: si True, acerca el mapa a la selección.
+    """
+    from qgis.utils import iface as qgis_iface
+
+    layer = get_or_create_layer()
+    if not layer:
+        return False
+
+    try:
+        ids = [int(af_id) for af_id in afiliado_ids] if afiliado_ids else []
+        layer.removeSelection()
+
+        if ids:
+            layer.selectByIds(ids)
+            if zoom_to_selection:
+                qgis_iface.mapCanvas().zoomToSelected(layer)
+
+        layer.triggerRepaint()
+        qgis_iface.mapCanvas().refresh()
+        return True
+    except Exception as e:
+        print(f"[PLUGIN] Error al resaltar afiliados: {e}")
+        return False
+
+
+def clear_afiliados_highlight():
+    """Quita el resaltado de afiliados en el mapa."""
+    return highlight_afiliados_by_ids([])
+
+
+def draw_centro_buffer(iface, lon, lat, radio_metros):
+    """
+    Dibuja un buffer circular (en metros) alrededor de un centro de interés.
+
+    Args:
+        iface: interfaz de QGIS
+        lon: longitud del centro (EPSG:4326)
+        lat: latitud del centro (EPSG:4326)
+        radio_metros: radio del buffer en metros
+
+    Returns:
+        QgsRubberBand: geometría dibujada en el canvas, o None si falla
+    """
+    from qgis.PyQt.QtGui import QColor
+    from qgis.gui import QgsRubberBand
+    from qgis.core import QgsGeometry, QgsWkbTypes
+
+    try:
+        point_geom = QgsGeometry.fromPointXY(QgsPointXY(float(lon), float(lat)))
+
+        crs_4326 = QgsCoordinateReferenceSystem("EPSG:4326")
+        crs_3857 = QgsCoordinateReferenceSystem("EPSG:3857")
+        canvas_crs = iface.mapCanvas().mapSettings().destinationCrs()
+
+        to_metric = QgsCoordinateTransform(crs_4326, crs_3857, QgsProject.instance())
+        to_canvas = QgsCoordinateTransform(crs_3857, canvas_crs, QgsProject.instance())
+
+        point_geom.transform(to_metric)
+        buffer_geom = point_geom.buffer(float(radio_metros), 64)
+        buffer_geom.transform(to_canvas)
+
+
+        rubber_band = QgsRubberBand(iface.mapCanvas(), QgsWkbTypes.PolygonGeometry)
+        # Morado clarito translúcido: borde y relleno
+        # Borde: morado claro, más opaco
+        rubber_band.setColor(QColor(180, 120, 255, 180))
+        # Relleno: morado claro, más transparente
+        rubber_band.setFillColor(QColor(180, 120, 255, 60))
+        rubber_band.setWidth(2)
+        rubber_band.setToGeometry(buffer_geom, None)
+        rubber_band.setZValue(1000)
+        rubber_band.show()
+
+        return rubber_band
+    except Exception as e:
+        print(f"[PLUGIN] Error al dibujar buffer: {e}")
+        return None
+
+
 def add_test_point(iface):
     layer = get_or_create_layer()
     point = QgsPointXY(-80.456, 22.149)

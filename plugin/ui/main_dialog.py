@@ -14,18 +14,25 @@ from qgis.PyQt.QtWidgets import (
     QHeaderView,
     QGroupBox,
     QLineEdit,
-    QDateEdit,
     QGridLayout,
     QComboBox,
     QMenu,
-    QAction
+    QAction,
+    QSpinBox
 )
-from qgis.PyQt.QtCore import Qt, QDate
+from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtGui import QColor
 from qgis.gui import QgsRubberBand, QgsMapToolEmitPoint
-from qgis.core import QgsWkbTypes, QgsPointXY
+from qgis.core import QgsWkbTypes, QgsPointXY, QgsProject
 
-from ..modules.map_tools import MapClickTool, add_point_with_data, force_reload_afiliados_layer
+from ..modules.map_tools import (
+    MapClickTool,
+    add_point_with_data,
+    force_reload_afiliados_layer,
+    highlight_afiliados_by_ids,
+    clear_afiliados_highlight,
+    draw_centro_buffer
+)
 from .afiliado_form import AfiliadoForm
 from .db_config_dialog import DatabaseConfigDialog
 from .centro_interes_form import CentroInteresForm
@@ -43,7 +50,8 @@ from ..modules.centros_interes_manager import (
     update_centro_interes,
     delete_centro_interes,
     search_centros_interes,
-    get_centro_by_id
+    get_centro_by_id,
+    get_afiliados_en_radio_centro
 )
 from ..utils.pdf_exporter import PDFExporter
 
@@ -54,6 +62,9 @@ class MainDialog(QDialog):
         self.iface = iface
         self.map_tool = None
         self.rubber_band = None
+        self.buffer_rubber_band = None
+        self.search_highlight_ids = []
+        self.buffer_highlight_ids = []
 
         self.setWindowTitle("ACLIFIM - Gestión de Afiliados")
         self.resize(800, 600)
@@ -165,21 +176,6 @@ class MainDialog(QDialog):
         self.filter_estado.addItems(["Todos", "Sin ubicar", "Cambio de dirección", "Ubicados"])
         filter_layout.addWidget(self.filter_estado, 2, 1)
         
-        # Fila 4: Fechas
-        filter_layout.addWidget(QLabel("Fecha Desde:"), 3, 0)
-        self.filter_fecha_desde = QDateEdit()
-        self.filter_fecha_desde.setCalendarPopup(True)
-        self.filter_fecha_desde.setDate(QDate(2000, 1, 1))
-        self.filter_fecha_desde.setSpecialValueText("Sin filtro")
-        filter_layout.addWidget(self.filter_fecha_desde, 3, 1)
-        
-        filter_layout.addWidget(QLabel("Fecha Hasta:"), 3, 2)
-        self.filter_fecha_hasta = QDateEdit()
-        self.filter_fecha_hasta.setCalendarPopup(True)
-        self.filter_fecha_hasta.setDate(QDate.currentDate())
-        self.filter_fecha_hasta.setSpecialValueText("Sin filtro")
-        filter_layout.addWidget(self.filter_fecha_hasta, 3, 3)
-        
         # Botones de filtro
         btn_filter_layout = QHBoxLayout()
         self.btn_buscar = QPushButton("🔍 Buscar")
@@ -191,7 +187,7 @@ class MainDialog(QDialog):
         btn_filter_layout.addWidget(self.btn_limpiar_filtros)
         btn_filter_layout.addStretch()
         
-        filter_layout.addLayout(btn_filter_layout, 4, 0, 1, 4)
+        filter_layout.addLayout(btn_filter_layout, 3, 0, 1, 4)
         
         filter_group.setLayout(filter_layout)
         layout.addWidget(filter_group)
@@ -385,6 +381,53 @@ class MainDialog(QDialog):
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         
         layout.addWidget(self.table_centros)
+
+        # Grupo: análisis por buffer
+        buffer_group = QGroupBox("Análisis de Afiliados por Buffer")
+        buffer_layout = QVBoxLayout()
+
+        buffer_controls = QHBoxLayout()
+        buffer_controls.addWidget(QLabel("Radio (metros):"))
+        self.buffer_radio_metros = QSpinBox()
+        self.buffer_radio_metros.setRange(10, 50000)
+        self.buffer_radio_metros.setValue(300)
+        buffer_controls.addWidget(self.buffer_radio_metros)
+
+        self.btn_generar_buffer = QPushButton("⭕ Generar Buffer")
+        self.btn_generar_buffer.clicked.connect(self.generar_buffer_centro)
+        buffer_controls.addWidget(self.btn_generar_buffer)
+
+        self.btn_limpiar_buffer = QPushButton("🧹 Limpiar Buffer")
+        self.btn_limpiar_buffer.clicked.connect(self.limpiar_buffer_centro)
+        buffer_controls.addWidget(self.btn_limpiar_buffer)
+        buffer_controls.addStretch()
+
+        buffer_layout.addLayout(buffer_controls)
+
+        self.label_buffer_resultados = QLabel("Buffer: sin análisis")
+        self.label_buffer_resultados.setStyleSheet("font-weight: bold; color: #8a2b2b;")
+        buffer_layout.addWidget(self.label_buffer_resultados)
+
+        self.table_buffer_afiliados = QTableWidget()
+        self.table_buffer_afiliados.setColumnCount(6)
+        self.table_buffer_afiliados.setHorizontalHeaderLabels([
+            "ID", "CI", "Nombre", "Apellido", "Distancia (m)", "Dirección"
+        ])
+        self.table_buffer_afiliados.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table_buffer_afiliados.setSelectionMode(QTableWidget.SingleSelection)
+        self.table_buffer_afiliados.setEditTriggers(QTableWidget.NoEditTriggers)
+
+        buffer_header = self.table_buffer_afiliados.horizontalHeader()
+        buffer_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        buffer_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        buffer_header.setSectionResizeMode(2, QHeaderView.Stretch)
+        buffer_header.setSectionResizeMode(3, QHeaderView.Stretch)
+        buffer_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        buffer_header.setSectionResizeMode(5, QHeaderView.Stretch)
+
+        buffer_layout.addWidget(self.table_buffer_afiliados)
+        buffer_group.setLayout(buffer_layout)
+        layout.addWidget(buffer_group)
         
         # Botones de acción
         btn_layout = QHBoxLayout()
@@ -514,6 +557,7 @@ class MainDialog(QDialog):
                         item.setBackground(color)
         
         self.label_resultados.setText(f"Total: {len(afiliados)} afiliados")
+        self.search_highlight_ids = []
         print(f"[PLUGIN] {len(afiliados)} afiliados cargados en tabla")
     
     def buscar_afiliados(self):
@@ -525,24 +569,12 @@ class MainDialog(QDialog):
         ci = self.filter_ci.text().strip()
         estado_filtro = self.filter_estado.currentText()
         
-        # Fechas (opcional)
-        fecha_desde = None
-        fecha_hasta = None
-        
-        if self.filter_fecha_desde.date() > QDate(2000, 1, 1):
-            fecha_desde = self.filter_fecha_desde.date().toString("yyyy-MM-dd")
-        
-        if self.filter_fecha_hasta.date() < QDate.currentDate():
-            fecha_hasta = self.filter_fecha_hasta.date().toString("yyyy-MM-dd")
-        
         # Buscar
         afiliados = search_afiliados(
             nombre=nombre if nombre else None,
             apellido=apellido if apellido else None,
             codigo=codigo if codigo else None,
-            carnet_id=ci if ci else None,
-            fecha_desde=fecha_desde,
-            fecha_hasta=fecha_hasta
+            carnet_id=ci if ci else None
         )
         
         # Aplicar filtro de estado
@@ -575,6 +607,8 @@ class MainDialog(QDialog):
                         item.setBackground(color)
         
         self.label_resultados.setText(f"Resultados: {len(afiliados)} afiliados encontrados")
+        self.search_highlight_ids = [a['id'] for a in afiliados]
+        self._apply_map_highlight()
         print(f"[PLUGIN] Búsqueda: {len(afiliados)} resultados")
     
     def limpiar_filtros(self):
@@ -584,9 +618,9 @@ class MainDialog(QDialog):
         self.filter_codigo.clear()
         self.filter_ci.clear()
         self.filter_estado.setCurrentIndex(0)  # "Todos"
-        self.filter_fecha_desde.setDate(QDate(2000, 1, 1))
-        self.filter_fecha_hasta.setDate(QDate.currentDate())
+        self.search_highlight_ids = []
         self.load_all_afiliados()
+        self._apply_map_highlight()
     
     def on_manage_selection_changed(self):
         """Maneja cambio de selección en tabla de gestión"""
@@ -997,6 +1031,12 @@ class MainDialog(QDialog):
         try:
             layer = force_reload_afiliados_layer()
             if layer:
+                try:
+                    node = QgsProject.instance().layerTreeRoot().findLayer(layer.id())
+                    if node:
+                        node.setItemVisibilityChecked(True)
+                except Exception:
+                    pass
                 print(f"[PLUGIN] Capa de afiliados lista: {layer.featureCount()} features")
             else:
                 print("[PLUGIN] No se pudo cargar la capa de afiliados")
@@ -1024,6 +1064,13 @@ class MainDialog(QDialog):
                     layer.updateExtents()
                     layer.triggerRepaint()
                     print("[PLUGIN] Datos de centros recargados desde PostGIS")
+
+                try:
+                    node = QgsProject.instance().layerTreeRoot().findLayer(layer.id())
+                    if node:
+                        node.setItemVisibilityChecked(True)
+                except Exception:
+                    pass
                 
                 self.iface.mapCanvas().refresh()
                 return layer
@@ -1041,6 +1088,98 @@ class MainDialog(QDialog):
         """Refresca las capas de afiliados y centros de interés"""
         self.load_afiliados_layer()
         self.load_centros_layer()
+        self._apply_map_highlight()
+
+    def _apply_map_highlight(self):
+        """Aplica resaltado en mapa priorizando el buffer sobre la búsqueda."""
+        if self.buffer_highlight_ids:
+            highlight_afiliados_by_ids(self.buffer_highlight_ids)
+            return
+
+        if self.search_highlight_ids:
+            highlight_afiliados_by_ids(self.search_highlight_ids)
+            return
+
+        clear_afiliados_highlight()
+
+    def limpiar_buffer_centro(self):
+        """Limpia visual y resultados del buffer de centros."""
+        if self.buffer_rubber_band:
+            try:
+                self.iface.mapCanvas().scene().removeItem(self.buffer_rubber_band)
+            except Exception:
+                pass
+            self.buffer_rubber_band = None
+
+        self.buffer_highlight_ids = []
+        self.table_buffer_afiliados.setRowCount(0)
+        self.label_buffer_resultados.setText("Buffer: sin análisis")
+        self._apply_map_highlight()
+        self.iface.mapCanvas().refresh()
+
+    def generar_buffer_centro(self):
+        """Genera un buffer alrededor del centro seleccionado y lista afiliados dentro."""
+        selected_rows = self.table_centros.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.warning(self, "Advertencia", "Selecciona un centro de interés primero")
+            return
+
+        row = selected_rows[0].row()
+        centro_id = int(self.table_centros.item(row, 0).text())
+        radio_metros = self.buffer_radio_metros.value()
+
+        centro = get_centro_by_id(centro_id)
+        if not centro or centro.get('lon') is None or centro.get('lat') is None:
+            QMessageBox.warning(self, "Advertencia", "El centro seleccionado no tiene coordenadas válidas")
+            return
+
+        self.limpiar_buffer_centro()
+
+        self.buffer_rubber_band = draw_centro_buffer(
+            self.iface,
+            centro['lon'],
+            centro['lat'],
+            radio_metros
+        )
+
+        if not self.buffer_rubber_band:
+            QMessageBox.warning(
+                self,
+                "Advertencia",
+                "No se pudo dibujar el área del buffer en el mapa."
+            )
+
+        afiliados = get_afiliados_en_radio_centro(centro_id, radio_metros)
+        self.table_buffer_afiliados.setRowCount(0)
+
+        for afiliado in afiliados:
+            table_row = self.table_buffer_afiliados.rowCount()
+            self.table_buffer_afiliados.insertRow(table_row)
+
+            self.table_buffer_afiliados.setItem(table_row, 0, QTableWidgetItem(str(afiliado['id'])))
+            self.table_buffer_afiliados.setItem(table_row, 1, QTableWidgetItem(afiliado.get('carnet_id', '')))
+            self.table_buffer_afiliados.setItem(table_row, 2, QTableWidgetItem(afiliado.get('nombres', '')))
+            self.table_buffer_afiliados.setItem(table_row, 3, QTableWidgetItem(afiliado.get('apellidos', '')))
+
+            distancia = afiliado.get('distancia_m')
+            distancia_txt = f"{distancia:.1f}" if distancia is not None else ""
+            self.table_buffer_afiliados.setItem(table_row, 4, QTableWidgetItem(distancia_txt))
+            self.table_buffer_afiliados.setItem(table_row, 5, QTableWidgetItem(afiliado.get('direccion', '')))
+
+        centro_nombre = centro.get('nombre', f"ID {centro_id}")
+        self.label_buffer_resultados.setText(
+            f"Buffer '{centro_nombre}' ({radio_metros} m): {len(afiliados)} afiliados"
+        )
+
+        self.buffer_highlight_ids = [a['id'] for a in afiliados]
+        self._apply_map_highlight()
+
+        if self.buffer_rubber_band:
+            buffer_geom = self.buffer_rubber_band.asGeometry()
+            if buffer_geom and not buffer_geom.isNull():
+                self.iface.mapCanvas().setExtent(buffer_geom.boundingBox())
+
+        self.iface.mapCanvas().refresh()
     
     # --- Métodos de acciones ---
 
@@ -1162,9 +1301,12 @@ class MainDialog(QDialog):
         result = dialog.exec_()
         
         if result == QDialog.Accepted:
+            self.refresh_layer()
+            self.load_all_afiliados()
+            self.load_centros_interes()
             self.iface.messageBar().pushMessage(
                 "ACLIFIM",
-                "Configuración de base de datos guardada",
+                "Configuración guardada y capas recargadas",
                 level=3,  # Success
                 duration=3
             )

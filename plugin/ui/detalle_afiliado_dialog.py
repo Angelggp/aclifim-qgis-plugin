@@ -1,5 +1,5 @@
 """
-Diálogo para mostrar todos los detalles de un afiliado
+Dialogo para mostrar todos los detalles de un afiliado en una sola pagina.
 """
 from qgis.PyQt.QtWidgets import (
     QDialog,
@@ -7,19 +7,21 @@ from qgis.PyQt.QtWidgets import (
     QHBoxLayout,
     QPushButton,
     QLabel,
-    QGroupBox,
     QGridLayout,
     QScrollArea,
     QWidget,
-    QTabWidget,
-    QMessageBox
+    QMessageBox,
+    QGroupBox,
+    QFileDialog,
+    QFrame
 )
 from qgis.PyQt.QtCore import Qt
-from qgis.PyQt.QtGui import QFont
+from qgis.PyQt.QtGui import QFont, QPixmap
 
-# Importar catálogos de códigos
 import sys
 import os
+import json
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from utils.catalogos import get_limitacion_descripcion, get_ambulacion_descripcion
 from utils.pdf_exporter import PDFExporter
@@ -28,529 +30,460 @@ from ..modules.access_importer import cambiar_direccion_afiliado
 
 
 class DetalleAfiliadoDialog(QDialog):
-    """Muestra todos los detalles de un afiliado con diseño de pestañas y dos columnas"""
-    
+    """Muestra los detalles de un afiliado en una vista unica y ordenada por secciones."""
+
     def __init__(self, afiliado, parent=None, iface=None):
         super().__init__(parent)
         self.afiliado = afiliado
         self.iface = iface
         self.parent_dialog = parent
+
+        self.photo_registry_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "afiliados_fotos.json"
+        )
+        self.photo_label = None
+        self.photo_path = self.get_photo_path()
+
         nombre_completo = f"{afiliado.get('nombres', '')} {afiliado.get('apellidos', '')}".strip()
-        self.setWindowTitle(f"📋 Detalles del Afiliado - {nombre_completo or 'Sin nombre'}")
-        self.resize(800, 700)
-        
+        self.setWindowTitle(f"Detalles del Afiliado - {nombre_completo or 'Sin nombre'}")
+        self.resize(860, 760)
+
         self.init_ui()
-    
+
     def init_ui(self):
-        """Inicializa la interfaz con diseño de pestañas"""
+        """Inicializa interfaz en una sola pagina con secciones."""
         main_layout = QVBoxLayout()
-        
-        # Título con nombre del afiliado
-        nombre_completo = f"{self.afiliado.get('nombres', '')} {self.afiliado.get('apellidos', '')}".strip()
-        title = QLabel(f"👤 {nombre_completo or 'Sin nombre'}")
-        title_font = QFont()
-        title_font.setPointSize(14)
-        title_font.setBold(True)
-        title.setFont(title_font)
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("color: #2c3e50; padding: 10px;")
-        main_layout.addWidget(title)
-        
-        # Widget de pestañas
-        tab_widget = QTabWidget()
-        tab_widget.setStyleSheet("""
-            QTabWidget::pane {
-                border: 1px solid #cccccc;
-                background: white;
-            }
-            QTabBar::tab {
-                background: #f0f0f0;
-                border: 1px solid #cccccc;
-                padding: 8px 16px;
-                margin-right: 2px;
-            }
-            QTabBar::tab:selected {
-                background: white;
-                border-bottom-color: white;
-                font-weight: bold;
-            }
-        """)
-        
-        # Pestañas con emojis
-        tab_widget.addTab(self.create_tab_identificacion(), "🆔 Identificación")
-        tab_widget.addTab(self.create_tab_ubicacion(), "📍 Ubicación")
-        tab_widget.addTab(self.create_tab_medicos(), "🏥 Médicos")
-        tab_widget.addTab(self.create_tab_familiares(), "👨‍👩‍👧 Familiares")
-        tab_widget.addTab(self.create_tab_laborales(), "💼 Laborales")
-        tab_widget.addTab(self.create_tab_organizacion(), "🏛️ Organización")
-        
-        main_layout.addWidget(tab_widget)
-        
-        # Botones
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        
-        # Botón Cambiar Dirección (solo si tiene coordenadas)
-        lon = self.afiliado.get('lon')
-        lat = self.afiliado.get('lat')
-        
-        if lon is not None and lat is not None:
-            btn_cambiar_dir = QPushButton("📍 Cambiar Dirección")
-            btn_cambiar_dir.clicked.connect(self.cambiar_direccion)
-            btn_cambiar_dir.setMinimumWidth(160)
-            btn_cambiar_dir.setStyleSheet("""
-                QPushButton {
-                    background-color: #FF9800;
-                    color: white;
-                    border: none;
-                    padding: 8px 16px;
-                    font-weight: bold;
-                    border-radius: 4px;
-                }
-                QPushButton:hover {
-                    background-color: #F57C00;
-                }
-            """)
-            btn_layout.addWidget(btn_cambiar_dir)
-        
-        # Botón Exportar PDF
-        btn_pdf = QPushButton("📄 Exportar PDF")
-        btn_pdf.clicked.connect(self.exportar_pdf)
-        btn_pdf.setMinimumWidth(140)
-        btn_pdf.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                font-weight: bold;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-        """)
-        btn_layout.addWidget(btn_pdf)
-        
-        # Botón Cerrar
-        btn_cerrar = QPushButton("✖ Cerrar")
-        btn_cerrar.clicked.connect(self.accept)
-        btn_cerrar.setMinimumWidth(120)
-        btn_cerrar.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                font-weight: bold;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-        """)
-        btn_layout.addWidget(btn_cerrar)
-        main_layout.addLayout(btn_layout)
-        
-        self.setLayout(main_layout)
-    
-    # ============= PESTAÑAS CON 2 COLUMNAS =============
-    
-    def create_tab_identificacion(self):
-        """Pestaña de identificación y datos personales con 2 columnas"""
-        widget = QWidget()
-        main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(15)
-        
-        # Grid con 2 columnas
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(40)
-        grid.setVerticalSpacing(15)
-        
-        row = 0
-        # Columna 1 y 2
-        self.add_grid_field(grid, row, 0, "Código:", self.afiliado.get('codigo'))
-        self.add_grid_field(grid, row, 2, "CI (Carnet):", self.afiliado.get('carnet_id'))
-        
-        row += 1
-        self.add_grid_field(grid, row, 0, "Folio:", self.afiliado.get('folio'))
-        self.add_grid_field(grid, row, 2, "ID Sistema:", self.afiliado.get('id'))
-        
-        row += 1
-        self.add_section_title(grid, row, "DATOS PERSONALES")
-        
-        row += 1
-        self.add_grid_field(grid, row, 0, "Nombres:", self.afiliado.get('nombres'))
-        self.add_grid_field(grid, row, 2, "Apellidos:", self.afiliado.get('apellidos'))
-        
-        row += 1
-        self.add_grid_field(grid, row, 0, "Sexo:", self.afiliado.get('sexo'))
-        self.add_grid_field(grid, row, 2, "Edad:", self.afiliado.get('edad'))
-        
-        row += 1
-        self.add_section_title(grid, row, "NACIMIENTO")
-        
-        row += 1
-        fecha_nac = self.format_date(self.afiliado.get('fecha_nacimiento'))
-        self.add_grid_field(grid, row, 0, "Fecha Nacimiento:", fecha_nac)
-        self.add_grid_field(grid, row, 2, "Lugar Nacimiento:", self.afiliado.get('lugar_nacimiento'))
-        
-        row += 1
-        self.add_grid_field(grid, row, 0, "Nacionalidad:", self.afiliado.get('nacionalidad'))
-        self.add_grid_field(grid, row, 2, "Ciudadanía:", self.afiliado.get('ciudadania'))
-        
-        main_layout.addLayout(grid)
-        main_layout.addStretch()
-        widget.setLayout(main_layout)
-        
-        # Scroll
+
         scroll = QScrollArea()
-        scroll.setWidget(widget)
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        
-        return scroll
-    
-    def create_tab_ubicacion(self):
-        """Pestaña de ubicación con 2 columnas"""
-        widget = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
-        
+
+        content = QWidget()
+        content_layout = QVBoxLayout()
+        content_layout.setContentsMargins(14, 14, 14, 14)
+        content_layout.setSpacing(12)
+
+        content_layout.addWidget(self.create_header_card())
+
+        content_layout.addWidget(self.create_section_identificacion())
+        content_layout.addWidget(self.create_section_ubicacion())
+        content_layout.addWidget(self.create_section_medicos())
+        content_layout.addWidget(self.create_section_familiares())
+        content_layout.addWidget(self.create_section_laborales())
+        content_layout.addWidget(self.create_section_organizacion())
+        content_layout.addStretch()
+
+        content.setLayout(content_layout)
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        lon = self.afiliado.get('lon')
+        lat = self.afiliado.get('lat')
+        if lon is not None and lat is not None:
+            btn_cambiar_dir = QPushButton("Cambiar Direccion")
+            btn_cambiar_dir.clicked.connect(self.cambiar_direccion)
+            btn_cambiar_dir.setMinimumWidth(160)
+            btn_layout.addWidget(btn_cambiar_dir)
+
+        btn_pdf = QPushButton("Exportar PDF")
+        btn_pdf.clicked.connect(self.exportar_pdf)
+        btn_pdf.setMinimumWidth(140)
+        btn_layout.addWidget(btn_pdf)
+
+        btn_cerrar = QPushButton("Cerrar")
+        btn_cerrar.clicked.connect(self.accept)
+        btn_cerrar.setMinimumWidth(120)
+        btn_layout.addWidget(btn_cerrar)
+
+        main_layout.addLayout(btn_layout)
+        self.setLayout(main_layout)
+
+    def create_header_card(self):
+        """Crea encabezado tipo carnet con foto pequena y datos principales."""
+        card = QFrame()
+        card.setFrameShape(QFrame.StyledPanel)
+
+        layout = QHBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(12)
+
+        photo_col = QVBoxLayout()
+        photo_col.setSpacing(6)
+
+        self.photo_label = QLabel()
+        self.photo_label.setFixedSize(110, 130)
+        self.photo_label.setAlignment(Qt.AlignCenter)
+        self.photo_label.setStyleSheet("border: 1px solid #bfbfbf; background: #f7f7f7;")
+        photo_col.addWidget(self.photo_label)
+
+        btn_photo = QPushButton("Agregar Imagen")
+        btn_photo.clicked.connect(self.seleccionar_imagen)
+        photo_col.addWidget(btn_photo)
+
+        btn_remove_photo = QPushButton("Quitar Imagen")
+        btn_remove_photo.clicked.connect(self.quitar_imagen)
+        photo_col.addWidget(btn_remove_photo)
+
+        layout.addLayout(photo_col)
+
+        info_col = QVBoxLayout()
+        info_col.setSpacing(6)
+
+        nombre_completo = f"{self.afiliado.get('nombres', '')} {self.afiliado.get('apellidos', '')}".strip() or "Sin nombre"
+        lbl_nombre = QLabel(nombre_completo)
+        nombre_font = QFont()
+        nombre_font.setPointSize(14)
+        nombre_font.setBold(True)
+        lbl_nombre.setFont(nombre_font)
+        info_col.addWidget(lbl_nombre)
+
+        info_grid = QGridLayout()
+        info_grid.setHorizontalSpacing(20)
+        info_grid.setVerticalSpacing(6)
+
+        self.add_grid_field(info_grid, 0, 0, "Codigo:", self.afiliado.get('codigo'))
+        self.add_grid_field(info_grid, 0, 2, "CI:", self.afiliado.get('carnet_id'))
+        self.add_grid_field(info_grid, 1, 0, "ID Sistema:", self.afiliado.get('id'))
+        self.add_grid_field(info_grid, 1, 2, "Estado:", self.get_estado_display())
+
+        info_col.addLayout(info_grid)
+        info_col.addStretch()
+        layout.addLayout(info_col, 1)
+
+        card.setLayout(layout)
+        self.update_photo_preview()
+        return card
+
+    def create_section_identificacion(self):
+        group = QGroupBox("Identificacion y Datos Personales")
         grid = QGridLayout()
-        grid.setHorizontalSpacing(40)
-        grid.setVerticalSpacing(15)
-        
+        grid.setHorizontalSpacing(20)
+        grid.setVerticalSpacing(8)
+
         row = 0
-        self.add_grid_field(grid, row, 0, "Dirección:", self.afiliado.get('direccion'))
+        self.add_grid_field(grid, row, 0, "Folio:", self.afiliado.get('folio'))
+        self.add_grid_field(grid, row, 2, "Sexo:", self.afiliado.get('sexo'))
+
+        row += 1
+        self.add_grid_field(grid, row, 0, "Edad:", self.afiliado.get('edad'))
+        self.add_grid_field(grid, row, 2, "Fecha Nacimiento:", self.format_date(self.afiliado.get('fecha_nacimiento')))
+
+        row += 1
+        self.add_grid_field(grid, row, 0, "Lugar Nacimiento:", self.afiliado.get('lugar_nacimiento'))
+        self.add_grid_field(grid, row, 2, "Nacionalidad:", self.afiliado.get('nacionalidad'))
+
+        row += 1
+        self.add_grid_field(grid, row, 0, "Ciudadania:", self.afiliado.get('ciudadania'))
+
+        group.setLayout(grid)
+        return group
+
+    def create_section_ubicacion(self):
+        group = QGroupBox("Ubicacion y Contacto")
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(20)
+        grid.setVerticalSpacing(8)
+
+        row = 0
+        self.add_grid_field(grid, row, 0, "Direccion:", self.afiliado.get('direccion'))
         self.add_grid_field(grid, row, 2, "Reparto:", self.afiliado.get('reparto'))
-        
+
         row += 1
-        self.add_grid_field(grid, row, 0, "Locación:", self.afiliado.get('locacion'))
-        self.add_grid_field(grid, row, 2, "Teléfono:", self.afiliado.get('telefono'))
-        
+        self.add_grid_field(grid, row, 0, "Locacion:", self.afiliado.get('locacion'))
+        self.add_grid_field(grid, row, 2, "Telefono:", self.afiliado.get('telefono'))
+
         row += 1
-        self.add_grid_field(grid, row, 0, "Tipo Teléfono:", self.afiliado.get('tipo_telefono'))
-        
-        row += 1
-        self.add_separator(grid, row)
-        
+        self.add_grid_field(grid, row, 0, "Tipo Telefono:", self.afiliado.get('tipo_telefono'))
+
         row += 1
         lon = self.afiliado.get('lon')
         lat = self.afiliado.get('lat')
-        if lon and lat:
+        if lon is not None and lat is not None:
             self.add_grid_field(grid, row, 0, "Longitud:", f"{lon:.6f}")
             self.add_grid_field(grid, row, 2, "Latitud:", f"{lat:.6f}")
         else:
             self.add_grid_field(grid, row, 0, "Coordenadas GPS:", "Sin ubicar")
-        
-        layout.addLayout(grid)
-        layout.addStretch()
-        widget.setLayout(layout)
-        
-        scroll = QScrollArea()
-        scroll.setWidget(widget)
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        
-        return scroll
-    
-    def create_tab_medicos(self):
-        """Pestaña de datos médicos con 2 columnas"""
-        widget = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
-        
+
+        group.setLayout(grid)
+        return group
+
+    def create_section_medicos(self):
+        group = QGroupBox("Datos Medicos")
         grid = QGridLayout()
-        grid.setHorizontalSpacing(40)
-        grid.setVerticalSpacing(15)
-        
-        row = 0
-        # Limitación - mostrar descripción legible
+        grid.setHorizontalSpacing(20)
+        grid.setVerticalSpacing(8)
+
         limitacion_cod = self.afiliado.get('limitacion_cod') or self.afiliado.get('limitacion')
-        limitacion_desc = get_limitacion_descripcion(limitacion_cod)
-        self.add_grid_field(grid, row, 0, "Limitación:", limitacion_desc)
-        
-        # Ambulación - mostrar descripción legible
         ambulacion_cod = self.afiliado.get('ambulacion_cod') or self.afiliado.get('nivel_ambulacion')
-        ambulacion_desc = get_ambulacion_descripcion(ambulacion_cod)
-        self.add_grid_field(grid, row, 2, "Nivel Ambulación:", ambulacion_desc)
-        
-        row += 1
-        self.add_separator(grid, row)
-        
+
+        row = 0
+        self.add_grid_field(grid, row, 0, "Limitacion:", get_limitacion_descripcion(limitacion_cod))
+        self.add_grid_field(grid, row, 2, "Nivel Ambulacion:", get_ambulacion_descripcion(ambulacion_cod))
+
         row += 1
         self.add_grid_field(grid, row, 0, "Causa:", self.afiliado.get('causa'))
         self.add_grid_field(grid, row, 2, "Discapacidad Asociada:", self.afiliado.get('discap_asociada'))
-        
-        layout.addLayout(grid)
-        layout.addStretch()
-        widget.setLayout(layout)
-        
-        scroll = QScrollArea()
-        scroll.setWidget(widget)
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        
-        return scroll
-    
-    def create_tab_familiares(self):
-        """Pestaña de datos familiares con 2 columnas"""
-        widget = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
-        
+
+        group.setLayout(grid)
+        return group
+
+    def create_section_familiares(self):
+        group = QGroupBox("Datos Familiares")
         grid = QGridLayout()
-        grid.setHorizontalSpacing(40)
-        grid.setVerticalSpacing(15)
-        
+        grid.setHorizontalSpacing(20)
+        grid.setVerticalSpacing(8)
+
         row = 0
         self.add_grid_field(grid, row, 0, "Hijo de:", self.afiliado.get('hijo_de'))
         self.add_grid_field(grid, row, 2, "Estado Civil:", self.afiliado.get('estado_civil'))
-        
+
         row += 1
-        self.add_grid_field(grid, row, 0, "Número de Hijos:", self.afiliado.get('no_hijos'))
+        self.add_grid_field(grid, row, 0, "Numero de Hijos:", self.afiliado.get('no_hijos'))
         self.add_grid_field(grid, row, 2, "Conviventes:", self.afiliado.get('conviventes'))
-        
+
         row += 1
         self.add_grid_field(grid, row, 0, "Personas Dependientes:", self.afiliado.get('no_personas_dep'))
-        
-        layout.addLayout(grid)
-        layout.addStretch()
-        widget.setLayout(layout)
-        
-        scroll = QScrollArea()
-        scroll.setWidget(widget)
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        
-        return scroll
-    
-    def create_tab_laborales(self):
-        """Pestaña de datos laborales y educativos con 2 columnas"""
-        widget = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
-        
+
+        group.setLayout(grid)
+        return group
+
+    def create_section_laborales(self):
+        group = QGroupBox("Datos Laborales y Educativos")
         grid = QGridLayout()
-        grid.setHorizontalSpacing(40)
-        grid.setVerticalSpacing(15)
-        
+        grid.setHorizontalSpacing(20)
+        grid.setVerticalSpacing(8)
+
         row = 0
-        self.add_grid_field(grid, row, 0, "Ocupación:", self.afiliado.get('ocupacion'))
+        self.add_grid_field(grid, row, 0, "Ocupacion:", self.afiliado.get('ocupacion'))
         self.add_grid_field(grid, row, 2, "Centro Trabajo/Estudio:", self.afiliado.get('centro_trabajo'))
-        
+
         row += 1
         ingreso = self.afiliado.get('ingreso_mensual')
-        ingreso_str = f"${ingreso:.2f}" if ingreso else "No especificado"
-        self.add_grid_field(grid, row, 0, "Ingreso Mensual:", ingreso_str)
-        
-        row += 1
-        self.add_separator(grid, row)
-        
+        ingreso_txt = f"${ingreso:.2f}" if ingreso else "No especificado"
+        self.add_grid_field(grid, row, 0, "Ingreso Mensual:", ingreso_txt)
+
         row += 1
         self.add_grid_field(grid, row, 0, "Grado Escolar:", self.afiliado.get('grado_escolar'))
         self.add_grid_field(grid, row, 2, "Especialidad:", self.afiliado.get('especialidad'))
-        
-        layout.addLayout(grid)
-        layout.addStretch()
-        widget.setLayout(layout)
-        
-        scroll = QScrollArea()
-        scroll.setWidget(widget)
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        
-        return scroll
-    
-    def create_tab_organizacion(self):
-        """Pestaña de datos de organización y administrativos con 2 columnas"""
-        widget = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
-        
+
+        group.setLayout(grid)
+        return group
+
+    def create_section_organizacion(self):
+        group = QGroupBox("Organizacion y Administracion")
         grid = QGridLayout()
-        grid.setHorizontalSpacing(40)
-        grid.setVerticalSpacing(15)
-        
+        grid.setHorizontalSpacing(20)
+        grid.setVerticalSpacing(8)
+
         row = 0
-        self.add_grid_field(grid, row, 0, "Área:", self.afiliado.get('area'))
-        self.add_grid_field(grid, row, 2, "Jefe de Núcleo:", self.afiliado.get('jefe_nucleo'))
-        
+        self.add_grid_field(grid, row, 0, "Area:", self.afiliado.get('area'))
+        self.add_grid_field(grid, row, 2, "Jefe de Nucleo:", self.afiliado.get('jefe_nucleo'))
+
         row += 1
         cuota = self.afiliado.get('cuota')
-        cuota_str = f"${cuota:.2f}" if cuota else "No especificado"
-        self.add_grid_field(grid, row, 0, "Cuota:", cuota_str)
-        
+        cuota_txt = f"${cuota:.2f}" if cuota else "No especificado"
+        self.add_grid_field(grid, row, 0, "Cuota:", cuota_txt)
+
         row += 1
-        self.add_separator(grid, row)
-        
+        self.add_grid_field(grid, row, 0, "Fecha Ingreso:", self.format_date(self.afiliado.get('fecha_ingreso')))
+        self.add_grid_field(grid, row, 2, "Fecha Alta:", self.format_date(self.afiliado.get('fecha_alta')))
+
         row += 1
-        fecha_ingr = self.format_date(self.afiliado.get('fecha_ingreso'))
-        self.add_grid_field(grid, row, 0, "Fecha Ingreso:", fecha_ingr)
-        
-        fecha_alta = self.format_date(self.afiliado.get('fecha_alta'))
-        self.add_grid_field(grid, row, 2, "Fecha Alta:", fecha_alta)
-        
-        row += 1
-        fecha_baja = self.format_date(self.afiliado.get('fecha_baja'))
-        self.add_grid_field(grid, row, 0, "Fecha Baja:", fecha_baja)
+        self.add_grid_field(grid, row, 0, "Fecha Baja:", self.format_date(self.afiliado.get('fecha_baja')))
         self.add_grid_field(grid, row, 2, "Motivo Baja:", self.afiliado.get('motivo_baja'))
-        
+
         row += 1
-        self.add_separator(grid, row)
-        
-        row += 1
-        estado = self.afiliado.get('estado', 'normal')
-        estado_display = {
-            'nuevo': '🆕 Nuevo (sin ubicar)',
-            'cambio_direccion': '📍 Cambio de dirección (re-ubicar)',
-            'normal': '✅ Normal'
-        }.get(estado, estado)
-        self.add_grid_field(grid, row, 0, "Estado:", estado_display)
-        
-        row += 1
-        fecha_creacion = self.format_datetime(self.afiliado.get('fecha_creacion'))
-        self.add_grid_field(grid, row, 0, "Fecha Creación:", fecha_creacion)
-        
-        row += 1
-        fecha_mod = self.format_datetime(self.afiliado.get('fecha_modificacion'))
-        self.add_grid_field(grid, row, 0, "Última Modificación:", fecha_mod)
-        
-        layout.addLayout(grid)
-        layout.addStretch()
-        widget.setLayout(layout)
-        
-        scroll = QScrollArea()
-        scroll.setWidget(widget)
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        
-        return scroll
-    
-    # ============= MÉTODOS AUXILIARES PARA GRID =============
-    
+        self.add_grid_field(grid, row, 0, "Fecha Creacion:", self.format_datetime(self.afiliado.get('fecha_creacion')))
+        self.add_grid_field(grid, row, 2, "Ultima Modificacion:", self.format_datetime(self.afiliado.get('fecha_modificacion')))
+
+        group.setLayout(grid)
+        return group
+
     def add_grid_field(self, grid, row, col, label_text, value):
-        """Agrega un campo al grid (label + valor en columnas específicas)"""
-        # Label
+        """Agrega un campo (etiqueta + valor) a un grid."""
         label = QLabel(label_text)
         label_font = QFont()
         label_font.setBold(True)
         label.setFont(label_font)
-        label.setStyleSheet("color: #34495e;")
         grid.addWidget(label, row, col)
-        
-        # Formatear valor
-        if value is None or str(value).strip() == '':
+
+        if value is None or str(value).strip() == "":
             value_text = "No especificado"
-            value_style = "color: #95a5a6; font-style: italic;"
+            style = "color: #777777;"
         else:
             value_text = str(value)
-            value_style = "color: #2c3e50;"
-        
+            style = "color: #222222;"
+
         value_label = QLabel(value_text)
         value_label.setWordWrap(True)
-        value_label.setStyleSheet(value_style)
         value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        value_label.setStyleSheet(style)
         grid.addWidget(value_label, row, col + 1)
-    
-    def add_section_title(self, grid, row, title_text):
-        """Agrega un título de sección que ocupa todas las columnas"""
-        title = QLabel(title_text)
-        title_font = QFont()
-        title_font.setBold(True)
-        title_font.setPointSize(10)
-        title.setFont(title_font)
-        title.setStyleSheet("""
-            color: #2c3e50; 
-            background-color: #ecf0f1; 
-            padding: 8px; 
-            border-radius: 4px;
-            margin-top: 10px;
-        """)
-        grid.addWidget(title, row, 0, 1, 4)
-    
-    def add_separator(self, grid, row):
-        """Agrega una línea separadora"""
-        separator = QLabel()
-        separator.setFixedHeight(1)
-        separator.setStyleSheet("background-color: #bdc3c7; margin: 10px 0;")
-        grid.addWidget(separator, row, 0, 1, 4)
-    
+
     def format_date(self, date_value):
-        """Formatea una fecha"""
         if not date_value:
             return "No especificado"
-        
         try:
             if hasattr(date_value, 'strftime'):
                 return date_value.strftime('%d/%m/%Y')
-            else:
-                return str(date_value)
+            return str(date_value)
         except Exception:
             return str(date_value)
-    
+
     def format_datetime(self, datetime_value):
-        """Formatea una fecha y hora"""
         if not datetime_value:
             return "No especificado"
-        
         try:
             if hasattr(datetime_value, 'strftime'):
                 return datetime_value.strftime('%d/%m/%Y %H:%M:%S')
-            else:
-                return str(datetime_value)
+            return str(datetime_value)
         except Exception:
             return str(datetime_value)
-    
+
+    def get_estado_display(self):
+        estado = self.afiliado.get('estado', 'normal')
+        return {
+            'nuevo': 'Nuevo (sin ubicar)',
+            'cambio_direccion': 'Cambio de direccion (reubicar)',
+            'normal': 'Normal'
+        }.get(estado, str(estado))
+
+    def load_photo_registry(self):
+        """Lee el registro local de fotos por ID de afiliado."""
+        if not os.path.exists(self.photo_registry_path):
+            return {}
+
+        try:
+            with open(self.photo_registry_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def save_photo_registry(self, data):
+        """Guarda el registro local de fotos por ID de afiliado."""
+        try:
+            with open(self.photo_registry_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"No se pudo guardar la imagen del afiliado.\n\n{e}")
+            return False
+
+    def get_photo_path(self):
+        """Obtiene la ruta de imagen asociada al afiliado actual."""
+        afiliado_id = self.afiliado.get('id')
+        if afiliado_id is None:
+            return None
+
+        registry = self.load_photo_registry()
+        path = registry.get(str(afiliado_id))
+        if path and os.path.exists(path):
+            return path
+        return None
+
+    def set_photo_path(self, path):
+        """Asocia (o quita) una ruta de imagen para el afiliado actual."""
+        afiliado_id = self.afiliado.get('id')
+        if afiliado_id is None:
+            return False
+
+        registry = self.load_photo_registry()
+        key = str(afiliado_id)
+
+        if path:
+            registry[key] = path
+        elif key in registry:
+            del registry[key]
+
+        return self.save_photo_registry(registry)
+
+    def update_photo_preview(self):
+        """Actualiza el preview de la foto tipo carnet."""
+        if not self.photo_label:
+            return
+
+        if self.photo_path and os.path.exists(self.photo_path):
+            pixmap = QPixmap(self.photo_path)
+            if not pixmap.isNull():
+                scaled = pixmap.scaled(
+                    self.photo_label.size(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                self.photo_label.setPixmap(scaled)
+                self.photo_label.setText("")
+                return
+
+        self.photo_label.setPixmap(QPixmap())
+        self.photo_label.setText("Sin imagen")
+
+    def seleccionar_imagen(self):
+        """Selecciona una imagen para el afiliado."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Seleccionar Imagen del Afiliado",
+            "",
+            "Imagenes (*.png *.jpg *.jpeg *.bmp)"
+        )
+
+        if not file_path:
+            return
+
+        if self.set_photo_path(file_path):
+            self.photo_path = file_path
+            self.update_photo_preview()
+
+    def quitar_imagen(self):
+        """Quita la imagen asociada al afiliado."""
+        if self.set_photo_path(None):
+            self.photo_path = None
+            self.update_photo_preview()
+
     def exportar_pdf(self):
-        """Exporta la información del afiliado a PDF"""
+        """Exporta la informacion del afiliado a PDF."""
         exporter = PDFExporter()
         exporter.export_afiliado(self.afiliado, self)
-    
+
     def cambiar_direccion(self):
-        """Inicia el proceso de cambio de dirección del afiliado"""
-        nombre_completo = f"{self.afiliado.get('nombres', '')} {self.afiliado.get('apellidos', '')}" .strip()
-        
-        # Mostrar diálogo de confirmación
+        """Inicia el proceso de cambio de direccion del afiliado."""
+        nombre_completo = f"{self.afiliado.get('nombres', '')} {self.afiliado.get('apellidos', '')}".strip()
+
         dialog = CambioDireccionDialog(nombre_completo, self)
-        
+
         if dialog.exec_() == QDialog.Accepted:
             motivo = dialog.get_motivo()
             afiliado_id = self.afiliado.get('id')
-            
-            # Llamar a la función que elimina geometría y cambia estado
+
             success, msg = cambiar_direccion_afiliado(afiliado_id, motivo)
-            
+
             if success:
                 QMessageBox.information(
                     self,
                     "Cambio Registrado",
-                    f"El cambio de dirección se registró correctamente.\n\n"
-                    f"El afiliado '{nombre_completo}' ahora aparecerá en la lista 'Sin Ubicar'.\n"
-                    f"Ubíquelo nuevamente en el mapa desde esa lista."
+                    f"El cambio de direccion se registro correctamente.\n\n"
+                    f"El afiliado '{nombre_completo}' ahora aparecera en la lista 'Sin Ubicar'.\n"
+                    f"Ubicalo nuevamente en el mapa desde esa lista."
                 )
-                # Cerrar el diálogo y refrescar si es posible
+
                 self.accept()
-                # Refrescar datos del padre si es posible
+
                 if hasattr(self.parent_dialog, 'load_all_afiliados'):
                     try:
                         self.parent_dialog.load_all_afiliados()
                     except Exception as e:
                         print(f"[DEBUG] Error al recargar afiliados: {e}")
-                
+
                 if hasattr(self.parent_dialog, 'load_unlocated_afiliados') and hasattr(self.parent_dialog, 'table_unlocated'):
                     try:
                         self.parent_dialog.load_unlocated_afiliados()
                     except Exception as e:
                         print(f"[DEBUG] Error al recargar sin ubicar: {e}")
-                
+
                 if hasattr(self.parent_dialog, 'refresh_layer'):
                     try:
                         self.parent_dialog.refresh_layer()
@@ -560,5 +493,5 @@ class DetalleAfiliadoDialog(QDialog):
                 QMessageBox.critical(
                     self,
                     "Error",
-                    f"No se pudo registrar el cambio de dirección:\n\n{msg}"
+                    f"No se pudo registrar el cambio de direccion:\n\n{msg}"
                 )

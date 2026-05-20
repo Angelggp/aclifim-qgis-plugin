@@ -352,3 +352,68 @@ def search_centros_interes(nombre=None, tipo=None):
     except Exception as e:
         print(f"[CENTROS] Error en búsqueda: {e}")
         return []
+
+
+def get_afiliados_en_radio_centro(centro_id, radio_metros):
+    """
+    Obtiene afiliados dentro de un radio (en metros) alrededor de un centro.
+
+    Retorna: list de dict con datos básicos y distancia en metros.
+    """
+    config = load_db_config()
+    if not config:
+        print("[CENTROS] No hay configuración de BD")
+        return []
+
+    try:
+        conn = psycopg2.connect(
+            host=config['host'],
+            port=config['port'],
+            user=config['user'],
+            password=config['password'],
+            dbname=config['dbname']
+        )
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT
+                a.id,
+                a.carnet_id,
+                a.nombres,
+                a.apellidos,
+                a.direccion,
+                a.estado,
+                ST_Distance(a.geom::geography, c.geom::geography) AS distancia_m
+            FROM afiliados a
+            INNER JOIN centros_interes c ON c.id = %s
+            WHERE a.geom IS NOT NULL
+              AND ST_DWithin(a.geom::geography, c.geom::geography, %s)
+            ORDER BY distancia_m ASC, a.apellidos ASC, a.nombres ASC
+            """,
+            (centro_id, float(radio_metros))
+        )
+
+        rows = cursor.fetchall()
+        afiliados = []
+
+        for row in rows:
+            afiliados.append({
+                'id': row[0],
+                'carnet_id': row[1] or '',
+                'nombres': row[2] or '',
+                'apellidos': row[3] or '',
+                'direccion': row[4] or '',
+                'estado': row[5] or 'normal',
+                'distancia_m': float(row[6]) if row[6] is not None else None
+            })
+
+        cursor.close()
+        conn.close()
+
+        print(f"[CENTROS] {len(afiliados)} afiliados dentro de {radio_metros} m del centro {centro_id}")
+        return afiliados
+
+    except Exception as e:
+        print(f"[CENTROS] Error en consulta de buffer: {e}")
+        return []

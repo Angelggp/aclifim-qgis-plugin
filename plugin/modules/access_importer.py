@@ -1110,7 +1110,7 @@ def get_afiliado_by_id(afiliado_id):
         return None
 
 
-def search_afiliados(nombre=None, codigo=None, carnet_id=None, apellido=None, fecha_desde=None, fecha_hasta=None):
+def search_afiliados(nombre=None, codigo=None, carnet_id=None, apellido=None):
     """
     Busca afiliados con filtros múltiples
     Retorna: list de dict con id, codigo, carnet_id, nombres, apellidos, direccion
@@ -1136,30 +1136,27 @@ def search_afiliados(nombre=None, codigo=None, carnet_id=None, apellido=None, fe
             WHERE 1=1
         """
         params = []
-        
+        conditions = []
+
+        # Coincidencia por cualquiera de los filtros llenados (OR)
         if nombre:
-            query += " AND LOWER(nombres) LIKE LOWER(%s)"
+            conditions.append("LOWER(nombres) LIKE LOWER(%s)")
             params.append(f'%{nombre}%')
-        
+
         if apellido:
-            query += " AND LOWER(apellidos) LIKE LOWER(%s)"
+            conditions.append("LOWER(apellidos) LIKE LOWER(%s)")
             params.append(f'%{apellido}%')
-        
+
         if codigo:
-            query += " AND codigo LIKE %s"
+            conditions.append("codigo LIKE %s")
             params.append(f'%{codigo}%')
-        
+
         if carnet_id:
-            query += " AND carnet_id LIKE %s"
+            conditions.append("carnet_id LIKE %s")
             params.append(f'%{carnet_id}%')
-        
-        if fecha_desde:
-            query += " AND fecha_ingreso >= %s"
-            params.append(fecha_desde)
-        
-        if fecha_hasta:
-            query += " AND fecha_ingreso <= %s"
-            params.append(fecha_hasta)
+
+        if conditions:
+            query += " AND (" + " OR ".join(conditions) + ")"
         
         query += " ORDER BY nombres, apellidos"
         
