@@ -27,6 +27,7 @@ from qgis.core import QgsWkbTypes, QgsPointXY, QgsProject
 
 from ..modules.map_tools import (
     MapClickTool,
+    get_or_create_layer,
     add_point_with_data,
     force_reload_afiliados_layer,
     highlight_afiliados_by_ids,
@@ -34,6 +35,7 @@ from ..modules.map_tools import (
     draw_centro_buffer
 )
 from .afiliado_form import AfiliadoForm
+from .resumen_afiliado_dialog import ResumenAfiliadoDialog
 from .db_config_dialog import DatabaseConfigDialog
 from .centro_interes_form import CentroInteresForm
 from ..modules.access_importer import (
@@ -234,6 +236,10 @@ class MainDialog(QDialog):
         self.btn_ubicar_afiliado.clicked.connect(self.ubicar_afiliado_desde_gestion)
         self.btn_ubicar_afiliado.setEnabled(False)
         btn_layout.addWidget(self.btn_ubicar_afiliado)
+
+        self.btn_resumen_mapa = QPushButton("Resumen en Mapa")
+        self.btn_resumen_mapa.clicked.connect(self.activar_resumen_mapa)
+        btn_layout.addWidget(self.btn_resumen_mapa)
         
         self.btn_refresh_all = QPushButton("🔄 Actualizar")
         self.btn_refresh_all.clicked.connect(self.load_all_afiliados)
@@ -667,6 +673,92 @@ class MainDialog(QDialog):
         # Mostrar diálogo de detalles
         from .detalle_afiliado_dialog import DetalleAfiliadoDialog
         dialog = DetalleAfiliadoDialog(afiliado, self, self.iface)
+        dialog.exec_()
+
+    def activar_resumen_mapa(self):
+        """Activa seleccion puntual en mapa para abrir resumen rapido de afiliado."""
+        canvas = self.iface.mapCanvas()
+        self.previous_map_tool = canvas.mapTool()
+        self.map_tool = MapClickTool(canvas, self.on_resumen_map_clicked)
+        canvas.setMapTool(self.map_tool)
+
+        self.iface.messageBar().pushMessage(
+            "ACLIFIM",
+            "Haz clic sobre un afiliado en el mapa para ver su resumen.",
+            level=0,
+            duration=5
+        )
+
+    def on_resumen_map_clicked(self, point):
+        """Maneja el clic en mapa para mostrar dialogo resumido de afiliado."""
+        from qgis.core import QgsCoordinateTransform, QgsGeometry, QgsRectangle
+
+        afiliado_id = None
+        layer = get_or_create_layer()
+
+        if not layer:
+            QMessageBox.warning(self, "Advertencia", "No se pudo cargar la capa de afiliados.")
+        else:
+            try:
+                canvas = self.iface.mapCanvas()
+                canvas_crs = canvas.mapSettings().destinationCrs()
+                layer_crs = layer.crs()
+
+                click_point = point
+                if canvas_crs != layer_crs:
+                    transform = QgsCoordinateTransform(canvas_crs, layer_crs, QgsProject.instance())
+                    click_point = transform.transform(point)
+
+                # Tolerancia aproximada de seleccion (en unidades de capa)
+                tol = canvas.mapUnitsPerPixel() * 8
+                rect = QgsRectangle(
+                    click_point.x() - tol,
+                    click_point.y() - tol,
+                    click_point.x() + tol,
+                    click_point.y() + tol
+                )
+
+                click_geom = QgsGeometry.fromPointXY(QgsPointXY(click_point.x(), click_point.y()))
+                nearest_feature = None
+                nearest_dist = None
+
+                for feat in layer.getFeatures(rect):
+                    geom = feat.geometry()
+                    if not geom or geom.isNull():
+                        continue
+
+                    dist = geom.distance(click_geom)
+                    if nearest_dist is None or dist < nearest_dist:
+                        nearest_dist = dist
+                        nearest_feature = feat
+
+                if nearest_feature is not None and nearest_feature['id'] is not None:
+                    afiliado_id = int(nearest_feature['id'])
+
+            except Exception as e:
+                print(f"[PLUGIN] Error al identificar afiliado en mapa: {e}")
+
+        # Restaurar herramienta de mapa
+        canvas = self.iface.mapCanvas()
+        if hasattr(self, 'previous_map_tool') and self.previous_map_tool:
+            canvas.setMapTool(self.previous_map_tool)
+        else:
+            canvas.unsetMapTool(self.map_tool)
+
+        if afiliado_id is None:
+            QMessageBox.information(
+                self,
+                "Sin afiliado",
+                "No se encontro un afiliado en el punto seleccionado."
+            )
+            return
+
+        afiliado = get_afiliado_by_id(afiliado_id)
+        if not afiliado:
+            QMessageBox.warning(self, "Advertencia", "No se pudieron cargar los datos del afiliado.")
+            return
+
+        dialog = ResumenAfiliadoDialog(afiliado, self)
         dialog.exec_()
     
     def mostrar_menu_contextual_afiliado(self, position):

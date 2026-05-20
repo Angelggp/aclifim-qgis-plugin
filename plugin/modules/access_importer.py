@@ -22,6 +22,138 @@ def load_db_config():
     return None
 
 
+def _connect_postgresql():
+    """Crea una conexion a PostgreSQL usando la configuracion guardada."""
+    config = load_db_config()
+    if not config:
+        raise ValueError("No hay configuracion de BD")
+
+    return psycopg2.connect(
+        host=config['host'],
+        port=config['port'],
+        user=config['user'],
+        password=config['password'],
+        dbname=config['dbname']
+    )
+
+
+def _ensure_foto_column(cursor):
+    """Asegura que la tabla afiliados tenga la columna para foto."""
+    cursor.execute(
+        """
+        ALTER TABLE afiliados
+        ADD COLUMN IF NOT EXISTS foto_afiliado BYTEA
+        """
+    )
+
+
+def get_afiliado_foto_bytes(afiliado_id):
+    """Obtiene bytes de la foto almacenada del afiliado (o None)."""
+    if afiliado_id is None:
+        return None
+
+    try:
+        conn = _connect_postgresql()
+        cursor = conn.cursor()
+
+        _ensure_foto_column(cursor)
+        conn.commit()
+
+        cursor.execute(
+            "SELECT foto_afiliado FROM afiliados WHERE id = %s",
+            (afiliado_id,)
+        )
+        row = cursor.fetchone()
+
+        cursor.close()
+        conn.close()
+
+        if not row or row[0] is None:
+            return None
+
+        return bytes(row[0])
+    except Exception as e:
+        print(f"[IMPORTADOR] Error al obtener foto del afiliado {afiliado_id}: {e}")
+        return None
+
+
+def save_afiliado_foto_bytes(afiliado_id, photo_bytes):
+    """Guarda bytes de foto para un afiliado en PostgreSQL."""
+    if afiliado_id is None:
+        return False, "ID de afiliado invalido"
+
+    if not photo_bytes:
+        return False, "No se recibio contenido de imagen"
+
+    try:
+        conn = _connect_postgresql()
+        cursor = conn.cursor()
+
+        _ensure_foto_column(cursor)
+
+        cursor.execute(
+            """
+            UPDATE afiliados
+            SET foto_afiliado = %s,
+                fecha_modificacion = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (psycopg2.Binary(photo_bytes), afiliado_id)
+        )
+
+        updated = cursor.rowcount
+        conn.commit()
+
+        cursor.close()
+        conn.close()
+
+        if updated == 0:
+            return False, "No se encontro el afiliado"
+
+        return True, "Imagen guardada"
+    except Exception as e:
+        error_msg = f"Error al guardar foto: {e}"
+        print(f"[IMPORTADOR] {error_msg}")
+        return False, error_msg
+
+
+def remove_afiliado_foto(afiliado_id):
+    """Elimina la foto almacenada para un afiliado."""
+    if afiliado_id is None:
+        return False, "ID de afiliado invalido"
+
+    try:
+        conn = _connect_postgresql()
+        cursor = conn.cursor()
+
+        _ensure_foto_column(cursor)
+
+        cursor.execute(
+            """
+            UPDATE afiliados
+            SET foto_afiliado = NULL,
+                fecha_modificacion = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (afiliado_id,)
+        )
+
+        updated = cursor.rowcount
+        conn.commit()
+
+        cursor.close()
+        conn.close()
+
+        if updated == 0:
+            return False, "No se encontro el afiliado"
+
+        return True, "Imagen eliminada"
+    except Exception as e:
+        error_msg = f"Error al eliminar foto: {e}"
+        print(f"[IMPORTADOR] {error_msg}")
+        return False, error_msg
+
+
 class AccessImporter:
     """Gestiona la importación de datos desde Access a PostgreSQL"""
     

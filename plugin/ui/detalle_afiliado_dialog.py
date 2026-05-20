@@ -20,13 +20,17 @@ from qgis.PyQt.QtGui import QFont, QPixmap
 
 import sys
 import os
-import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from utils.catalogos import get_limitacion_descripcion, get_ambulacion_descripcion
 from utils.pdf_exporter import PDFExporter
 from .cambio_direccion_dialog import CambioDireccionDialog
-from ..modules.access_importer import cambiar_direccion_afiliado
+from ..modules.access_importer import (
+    cambiar_direccion_afiliado,
+    get_afiliado_foto_bytes,
+    save_afiliado_foto_bytes,
+    remove_afiliado_foto
+)
 
 
 class DetalleAfiliadoDialog(QDialog):
@@ -37,13 +41,8 @@ class DetalleAfiliadoDialog(QDialog):
         self.afiliado = afiliado
         self.iface = iface
         self.parent_dialog = parent
-
-        self.photo_registry_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "afiliados_fotos.json"
-        )
         self.photo_label = None
-        self.photo_path = self.get_photo_path()
+        self.photo_bytes = get_afiliado_foto_bytes(self.afiliado.get('id'))
 
         nombre_completo = f"{afiliado.get('nombres', '')} {afiliado.get('apellidos', '')}".strip()
         self.setWindowTitle(f"Detalles del Afiliado - {nombre_completo or 'Sin nombre'}")
@@ -352,64 +351,14 @@ class DetalleAfiliadoDialog(QDialog):
             'normal': 'Normal'
         }.get(estado, str(estado))
 
-    def load_photo_registry(self):
-        """Lee el registro local de fotos por ID de afiliado."""
-        if not os.path.exists(self.photo_registry_path):
-            return {}
-
-        try:
-            with open(self.photo_registry_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return data if isinstance(data, dict) else {}
-        except Exception:
-            return {}
-
-    def save_photo_registry(self, data):
-        """Guarda el registro local de fotos por ID de afiliado."""
-        try:
-            with open(self.photo_registry_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            return True
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudo guardar la imagen del afiliado.\n\n{e}")
-            return False
-
-    def get_photo_path(self):
-        """Obtiene la ruta de imagen asociada al afiliado actual."""
-        afiliado_id = self.afiliado.get('id')
-        if afiliado_id is None:
-            return None
-
-        registry = self.load_photo_registry()
-        path = registry.get(str(afiliado_id))
-        if path and os.path.exists(path):
-            return path
-        return None
-
-    def set_photo_path(self, path):
-        """Asocia (o quita) una ruta de imagen para el afiliado actual."""
-        afiliado_id = self.afiliado.get('id')
-        if afiliado_id is None:
-            return False
-
-        registry = self.load_photo_registry()
-        key = str(afiliado_id)
-
-        if path:
-            registry[key] = path
-        elif key in registry:
-            del registry[key]
-
-        return self.save_photo_registry(registry)
-
     def update_photo_preview(self):
         """Actualiza el preview de la foto tipo carnet."""
         if not self.photo_label:
             return
 
-        if self.photo_path and os.path.exists(self.photo_path):
-            pixmap = QPixmap(self.photo_path)
-            if not pixmap.isNull():
+        if self.photo_bytes:
+            pixmap = QPixmap()
+            if pixmap.loadFromData(self.photo_bytes):
                 scaled = pixmap.scaled(
                     self.photo_label.size(),
                     Qt.KeepAspectRatio,
@@ -434,15 +383,30 @@ class DetalleAfiliadoDialog(QDialog):
         if not file_path:
             return
 
-        if self.set_photo_path(file_path):
-            self.photo_path = file_path
-            self.update_photo_preview()
+        try:
+            with open(file_path, 'rb') as f:
+                image_bytes = f.read()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"No se pudo leer la imagen.\n\n{e}")
+            return
+
+        success, msg = save_afiliado_foto_bytes(self.afiliado.get('id'), image_bytes)
+        if not success:
+            QMessageBox.critical(self, "Error", f"No se pudo guardar la imagen.\n\n{msg}")
+            return
+
+        self.photo_bytes = image_bytes
+        self.update_photo_preview()
 
     def quitar_imagen(self):
         """Quita la imagen asociada al afiliado."""
-        if self.set_photo_path(None):
-            self.photo_path = None
-            self.update_photo_preview()
+        success, msg = remove_afiliado_foto(self.afiliado.get('id'))
+        if not success:
+            QMessageBox.critical(self, "Error", f"No se pudo eliminar la imagen.\n\n{msg}")
+            return
+
+        self.photo_bytes = None
+        self.update_photo_preview()
 
     def exportar_pdf(self):
         """Exporta la informacion del afiliado a PDF."""
