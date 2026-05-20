@@ -1,3 +1,6 @@
+import configparser
+import os
+
 from qgis.PyQt.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -80,6 +83,7 @@ class MainDialog(QDialog):
         self.tabs.addTab(self.create_centros_tab(), "Centros de Interés")
         self.tabs.addTab(self.create_import_tab(), "Importar")
         self.tabs.addTab(self.create_config_tab(), "Configuración")
+        self.tabs.addTab(self.create_help_tab(), "Ayuda")
         
         main_layout.addWidget(self.tabs)
         
@@ -525,6 +529,96 @@ class MainDialog(QDialog):
         
         widget.setLayout(layout)
         return widget
+
+    def create_help_tab(self):
+        """Pestaña de ayuda con información resumida del plugin."""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        metadata = self.get_plugin_metadata()
+
+        resumen_group = QGroupBox("Información General")
+        resumen_layout = QVBoxLayout()
+
+        resumen_label = QLabel(
+            "ACLIFIM es un plugin para la gestión geoespacial de afiliados en QGIS.\n"
+            "Permite importar datos desde Access, ubicar afiliados en el mapa,\n"
+            "filtrar información, consultar detalles, trabajar con centros de interés\n"
+            "y realizar análisis espaciales mediante buffers."
+        )
+        resumen_label.setWordWrap(True)
+        resumen_layout.addWidget(resumen_label)
+
+        version = metadata.get('version', 'No disponible')
+        qgis_min = metadata.get('qgisMinimumVersion', 'No disponible')
+        autor = metadata.get('author', 'No disponible')
+        meta_label = QLabel(
+            f"Versión del plugin: {version}\n"
+            f"Versión mínima de QGIS: {qgis_min}\n"
+            f"Autor registrado: {autor}"
+        )
+        meta_label.setWordWrap(True)
+        resumen_layout.addWidget(meta_label)
+
+        resumen_group.setLayout(resumen_layout)
+        layout.addWidget(resumen_group)
+
+        contacto_group = QGroupBox("Contacto del Desarrollador")
+        contacto_layout = QGridLayout()
+
+        contacto_layout.addWidget(QLabel("Desarrollador:"), 0, 0)
+        contacto_layout.addWidget(QLabel("Amauri"), 0, 1)
+
+        contacto_layout.addWidget(QLabel("Teléfono:"), 1, 0)
+        contacto_layout.addWidget(QLabel("5 6881301"), 1, 1)
+
+        contacto_layout.addWidget(QLabel("Repositorio:"), 2, 0)
+        repo_label = QLabel(
+            '<a href="https://github.com/Angelggp/aclifim-qgis-plugin.git">'
+            'https://github.com/Angelggp/aclifim-qgis-plugin.git'
+            '</a>'
+        )
+        repo_label.setOpenExternalLinks(True)
+        repo_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        contacto_layout.addWidget(repo_label, 2, 1)
+
+        contacto_group.setLayout(contacto_layout)
+        layout.addWidget(contacto_group)
+
+        ayuda_extra_group = QGroupBox("Uso Rápido")
+        ayuda_extra_layout = QVBoxLayout()
+
+        ayuda_extra_label = QLabel(
+            "1. Configure la conexión a PostgreSQL/PostGIS en la pestaña Configuración.\n"
+            "2. Importe afiliados desde Access si necesita sincronizar datos.\n"
+            "3. Use la pestaña Gestionar Afiliados para buscar y consultar registros.\n"
+            "4. Use la pestaña Centros de Interés para generar buffers y análisis espaciales."
+        )
+        ayuda_extra_label.setWordWrap(True)
+        ayuda_extra_layout.addWidget(ayuda_extra_label)
+
+        ayuda_extra_group.setLayout(ayuda_extra_layout)
+        layout.addWidget(ayuda_extra_group)
+
+        layout.addStretch()
+        widget.setLayout(layout)
+        return widget
+
+    def get_plugin_metadata(self):
+        """Lee metadata.txt del plugin y retorna sus valores principales."""
+        metadata_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            'metadata.txt'
+        )
+
+        parser = configparser.ConfigParser()
+        try:
+            parser.read(metadata_path, encoding='utf-8')
+            if parser.has_section('general'):
+                return dict(parser.items('general'))
+        except Exception as e:
+            print(f"[PLUGIN] Error al leer metadata del plugin: {e}")
+
+        return {}
     
     # --- Métodos auxiliares ---
     
