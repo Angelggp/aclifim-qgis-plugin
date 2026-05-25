@@ -11,6 +11,8 @@ Plugin de Gestión de Afiliados para QGIS
   - [Error de codificación (byte 0x81)](#2-error-de-codificación-byte-0x81)
   - [Base de datos con contraseña](#3-base-de-datos-con-contraseña)
   - [Conflicto 32-bit vs 64-bit](#4-conflicto-32-bit-vs-64-bit)
+- [Problemas de Importación](#problemas-de-importación)
+  - [Afiliados marcados azul sin haberlos modificado](#1-afiliados-marcados-en-azul-cambio-de-dirección-sin-haberlos-modificado)
 - [Problemas con PostgreSQL](#problemas-con-postgresql)
 - [Problemas de Instalación](#problemas-de-instalación)
 - [Problemas de Rendimiento](#problemas-de-rendimiento)
@@ -355,6 +357,47 @@ Couldn't load plugin 'gestion_afiliados' due to an error when calling its classF
 
 ---
 
+## Problemas de Importación
+
+### 1. Afiliados marcados en azul (cambio de dirección) sin haberlos modificado
+
+#### 🔴 Síntomas
+Despues de importar desde Access, muchos afiliados aparecen en azul (estado "cambio de dirección") aunque nunca se cambió su dirección ni fueron ubicados en el mapa.
+
+#### 🔍 Causa
+Versiones antiguas del plugin comparaban el texto de dirección entre Access y PostgreSQL sin filtrar por si el afiliado tenía coordenadas. Cualquier diferencia mínima de codificación (tildes, espacios, mayúsculas) disparaba el estado `cambio_direccion`.
+
+#### ✅ Solución
+
+La versión **v2.2** del plugin corrige esto automáticamente. Solo se marca `cambio_direccion` si el afiliado ya tenía coordenadas en el mapa.
+
+Si usas una versión anterior, actualiza `access_importer.py`:
+
+```python
+# BUSCAR (en synchronize_with_postgresql):
+if direccion_access_norm != direccion_pg_norm:
+    # CAMBIO DE DIRECCIÓN
+    cursor.execute("UPDATE afiliados SET estado='cambio_direccion'...")
+
+# REEMPLAZAR POR:
+if direccion_access_norm != direccion_pg_norm and geom_pg is not None:
+    # CAMBIO DE DIRECCIÓN (solo si tenía coordenadas)
+    cursor.execute("UPDATE afiliados SET estado='cambio_direccion'...")
+```
+
+#### 🛠️ Restablecer afiliados erróneamente marcados
+
+Para limpiar afiliados marcados incorrectamente (sin coordenadas):
+```sql
+-- Restaurar a 'nuevo' todos los que están en cambio_direccion pero sin geom
+UPDATE afiliados
+SET estado = 'nuevo'
+WHERE estado = 'cambio_direccion'
+  AND (geom IS NULL OR ST_IsEmpty(geom));
+```
+
+---
+
 ## Problemas de Rendimiento
 
 ### 1. La importación es muy lenta
@@ -457,5 +500,5 @@ Si los problemas persisten:
 
 ---
 
-**Última actualización**: Mayo 2026  
-**Versión**: 1.0
+**Última actualización**: Mayo 2026 (v2.2)
+**Versión**: 1.1

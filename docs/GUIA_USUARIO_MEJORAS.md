@@ -59,12 +59,16 @@ Ocupación:          No especificado
 ```
 Limitación: 01
 Ambulación: 08
+Locación: 1
+Jefe Núcleo: S
 ```
 
 **Ahora:**
 ```
-Limitación:         Amputado en 1 Pierna (01)
-Ambulación:         Bastón/Muleta + Prótesis (08)
+Limitación:         Amputado en 1 Pierna
+Ambulación:         Bastón/Muleta + Prótesis
+Locación:           Urbana
+Jefe de Núcleo:    Sí
 ```
 
 **Ventaja:** No necesitas memorizar códigos
@@ -91,6 +95,43 @@ Ambulación:         Bastón/Muleta + Prótesis (08)
 - ✅ Una sola columna (más fácil de leer)
 - ✅ Puedes seleccionar y copiar texto
 - ✅ Colores y estilos modernos
+
+---
+
+## 🔄 Novedades Adicionales — v2.2 (25 mayo 2026)
+
+### 6. **Leyenda de Colores en las Tablas**
+
+Ahora las tablas de afiliados muestran una leyenda en la parte superior:
+
+```
+[ Verde claro ]  Sin ubicar — afiliado nuevo, aún sin posición en el mapa
+[ Azul claro  ]  Cambio de dirección — dirección cambió, necesita reubicarse
+```
+
+**Ventaja:** Sabes de un vistazo cuáles afiliados necesitan atención en el mapa.
+
+---
+
+### 7. **PDF con Datos Completos**
+
+El PDF generado ahora incluye los mismos textos descriptivos que el diálogo (Locación, Jefe de Núcleo, Causa, Ocupación, Grado Escolar) en lugar de códigos numéricos.
+
+---
+
+### 8. **Gestión del Buffer de Centro de Interés**
+
+- El botón **"Generar Buffer"** ahora sólo se activa cuando tienes un centro seleccionado en la tabla.
+- Al generar el buffer con éxito, aparece un mensaje con cuántos afiliados quedaron dentro del área.
+- Al hacer clic en **"Limpiar Buffer"**, el cursor del mapa vuelve al modo normal automáticamente.
+
+---
+
+### 9. **Importación de Access sin Falsos Cambios de Dirección**
+
+Antes, al importar datos desde Access, el sistema a veces marcaba afiliados en **azul (cambio de dirección)** aunque nadie hubiera cambiado su dirección. Esto ocurría por diferencias técnicas de codificación entre Access y PostgreSQL.
+
+Ahora el sistema solo marca un afiliado como "cambio de dirección" si ya tenía coordenadas en el mapa — es decir, si realmente necesita ser reubicado.
 
 ---
 

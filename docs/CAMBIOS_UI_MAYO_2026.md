@@ -104,6 +104,43 @@ Como solicitaste, se eliminó la visualización del campo "Org. Rev." (Organizac
 
 ---
 
+## 🔄 Mejoras Adicionales de UI — v2.2 (25 mayo 2026)
+
+### 7. **Leyenda de Colores en Tablas**
+
+Se añadió una leyenda visual en las tablas de afiliados (pestaña "Gestión" y pestaña "Sin Ubicar") que explica el significado de los colores de las filas:
+
+```
+[ Fondo verde claro ]  Sin ubicar (nuevo, sin coordenadas)
+[ Fondo azul claro  ]  Cambio de dirección (necesita re-ubicarse)
+```
+
+Implementación (fondo de etiqueta con color):
+- Verde: `background-color: rgb(144, 238, 144)`
+- Azul: `background-color: rgb(135, 206, 250)`
+
+### 8. **Descripción de Campos Codificados**
+
+En el diálogo de detalle de afiliado, los siguientes campos ahora muestran texto legible en lugar de códigos numéricos:
+
+| Campo | Antes | Ahora |
+|-------|-------|-------|
+| Locación | `1` o `2` | `Urbana` o `Rural` |
+| Jefe de Núcleo | `S`, `N`, `1`, `0`… | `Sí` o `No` |
+| Limitación | `Amputado en 1 Pierna (01)` | `Amputado en 1 Pierna` |
+| Ambulación | `Silla de Ruedas (01)` | `Silla de Ruedas` |
+
+### 9. **Botón "Generar Buffer" Mejorado**
+
+- El botón ahora inicia **deshabilitado** y se habilita solo cuando hay un Centro de Interés seleccionado en la tabla.
+- Al generar el buffer con éxito, se muestra un mensaje informativo con el número de afiliados encontrados.
+
+### 10. **"Limpiar Buffer" Restaura Cursor del Mapa**
+
+Al hacer clic en "Limpiar Buffer", si el cursor activo era el de inspección del buffer, el cursor del mapa se restaura automáticamente al estado anterior (puntero de navegación normal).
+
+---
+
 ## 🎨 Capturas de Pantalla Conceptuales
 
 ### Diseño Anterior

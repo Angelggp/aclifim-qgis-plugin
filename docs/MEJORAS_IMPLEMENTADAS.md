@@ -13,6 +13,8 @@ Este documento detalla las mejoras implementadas para prevenir y resolver los pr
 3. ✅ Bases de datos Access protegidas con contraseña
 4. ✅ Detección automática de tablas
 5. ✅ Mejor manejo de errores y mensajes informativos
+6. ✅ _(v2.2)_ Falsos positivos de "cambio de dirección" en importación
+7. ✅ _(v2.2)_ Normalización robusta de direcciones con `unicodedata`
 
 ---
 
@@ -170,7 +172,75 @@ def auto_detect_and_import(self, password=None, progress_callback=None):
 
 ---
 
-## 📚 Documentación Creada
+### 5. Normalización de Direcciones con unicodedata _(v2.2)_
+
+**Archivo**: `plugin/modules/access_importer.py`
+
+#### Problema:
+La comparación de direcciones entre Access y PostgreSQL fallaba por:
+- Caracteres acentuados con distinta codificación (`é` vs `e` + combining accent)
+- Caracteres de control invisibles
+- Diferencias de espaciado
+
+#### Solución — `_normalize_address`:
+```python
+import unicodedata
+
+def _normalize_address(self, text):
+    if not text:
+        return ''
+    # Descomponer acentos (NFKD) y eliminar marcas diacríticas
+    normalized = unicodedata.normalize('NFKD', str(text))
+    normalized = ''.join(c for c in normalized
+                         if not unicodedata.combining(c)
+                         and unicodedata.category(c) != 'Cc')  # excluir control chars
+    return normalized.strip().upper()
+```
+
+**Beneficios**:
+- ✅ `é`, `é` y `e` comparan igual
+- ✅ Caracteres de control invisibles eliminados
+- ✅ Comparación insensible a mayúsculas/minúsculas
+
+---
+
+### 6. Corrección Falsos Positivos de "Cambio de Dirección" _(v2.2)_
+
+**Archivo**: `plugin/modules/access_importer.py`
+
+#### Problema original:
+Cualquier diferencia en el texto de la dirección (incluyendo diferencias de codificación) marcaba al afiliado como `cambio_direccion`, aunque nunca hubiera sido geolocalizad.
+
+```python
+# ANTES (problemático):
+if direccion_access_norm != direccion_pg_norm:
+    # Marcaba cambio_direccion SIEMPRE que el texto difiriera
+    cursor.execute("UPDATE afiliados SET estado='cambio_direccion'...")
+```
+
+#### Solución implementada:
+```python
+# AHORA (correcto):
+if direccion_access_norm != direccion_pg_norm and geom_pg is not None:
+    # Solo si tenía coordenadas: el afiliado necesita reubicarse
+    cursor.execute("UPDATE afiliados SET estado='cambio_direccion'...")
+else:
+    # Sin geom: actualiza el texto de dirección normalmente
+    cursor.execute("UPDATE afiliados SET direccion=%s...")
+```
+
+**Regla de negocio implementada:**
+
+| Caso | Acción |
+|------|--------|
+| Dirección igual | Actualización normal |
+| Dirección cambió + sin geom | Actualización normal (texto) |
+| Dirección cambió + con geom | `cambio_direccion` — necesita reubicarse |
+
+**Beneficios**:
+- ✅ Elimina falsos positivos en re-importaciones
+- ✅ Afiliados sin ubicar nunca se marcan azul erróneamente
+- ✅ La dirección en texto siempre se actualiza correctamente
 
 ### 1. REQUISITOS_SISTEMA.md
 **Ubicación**: `docs/REQUISITOS_SISTEMA.md`
@@ -311,6 +381,8 @@ docs/TROUBLESHOOTING.md
 | **Documentación** | Mínima | 4 documentos completos + script |
 | **Diagnóstico** | Manual | Script automático |
 | **Soporte clientes** | Difícil de explicar | Guías paso a paso |
+| **Cambio de dirección** | Falsos positivos frecuentes | Solo si el afiliado ya tiene geom |
+| **Comparación de texto** | Sensible a tildes/espacios | Normalizado con `unicodedata` |
 
 ---
 

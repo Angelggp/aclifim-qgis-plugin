@@ -133,6 +133,73 @@ ID Sistema:          42
 
 ---
 
+## 🔄 Segunda Tanda de Cambios (v2.2 — 25 mayo 2026)
+
+### ✅ 1. Leyenda de Colores en Tablas de Afiliados
+**Archivo:** `plugin/ui/main_dialog.py`
+
+Se añadió una leyenda visual en las pestañas "Gestión" y "Sin Ubicar":
+- Fondo **verde claro** — Afiliados sin ubicar (nuevos)
+- Fondo **azul claro** — Afiliados con cambio de dirección pendiente
+
+---
+
+### ✅ 2. Campo "Jefe de Núcleo" como Sí / No
+**Archivos:** `plugin/utils/catalogos.py`, `plugin/ui/detalle_afiliado_dialog.py`, `plugin/utils/pdf_exporter.py`
+
+Antes se mostraba el valor crudo del campo (S, N, 1, 0…). Ahora se muestra:
+- `"Sí"` si el afiliado es jefe de núcleo
+- `"No"` en cualquier otro caso
+
+---
+
+### ✅ 3. Descripciones sin Códigos en Paréntesis
+**Archivo:** `plugin/utils/catalogos.py`
+
+En la versión anterior, las descripciones incluían el código al final: `"Amputado en 1 Pierna (01)"`. Ahora se muestra solo el texto: `"Amputado en 1 Pierna"`, más limpio para el usuario final.
+
+---
+
+### ✅ 4. Campo "Locación" como Urbana / Rural
+**Archivos:** `plugin/utils/catalogos.py`, `plugin/ui/detalle_afiliado_dialog.py`, `plugin/utils/pdf_exporter.py`
+
+Antes se mostraba `"1"` o `"2"`. Ahora:
+- `"Urbana"` para código 1
+- `"Rural"` para código 2
+
+---
+
+### ✅ 5. PDF Actualizado con Todos los Catálogos
+**Archivo:** `plugin/utils/pdf_exporter.py`
+
+El PDF generado ahora usa las mismas funciones de catálogo que el diálogo de detalle:
+`get_causa_descripcion`, `get_ocupacion_descripcion`, `get_grado_escolar_descripcion`, `get_locacion_descripcion`, `get_jefe_nucleo_descripcion`.
+
+---
+
+### ✅ 6. Corrección: Falsos Positivos de "Cambio de Dirección"
+**Archivo:** `plugin/modules/access_importer.py`
+
+**Problema:** Al importar desde Access, el sistema marcaba afiliados como "cambio de dirección" (azul) incluso cuando nunca habían sido geolocalizados, debido a pequeñas diferencias de codificación o espacios entre el texto de Access y PostgreSQL.
+
+**Solución:** Solo se marca `cambio_direccion` si el afiliado **ya tenía coordenadas** (`geom IS NOT NULL`). Si no tenía ubicación, un cambio de texto de dirección se actualiza silenciosamente como actualización normal. Además se mejoró la normalización de texto con `unicodedata` para comparaciones más robustas.
+
+---
+
+### ✅ 7. Boton "Generar Buffer" deshabilitado hasta seleccionar Centro
+**Archivo:** `plugin/ui/main_dialog.py`
+
+El botón ahora se habilita solo cuando hay una fila seleccionada en la tabla de Centros de Interés, evitando errores por click accidental. Además, al generar el buffer, se muestra un mensaje de éxito con el conteo de afiliados encontrados.
+
+---
+
+### ✅ 8. "Limpiar Buffer" Restaura el Cursor del Mapa
+**Archivo:** `plugin/ui/main_dialog.py`
+
+Al hacer clic en "Limpiar Buffer", si el cursor activo era el de inspección de afiliados del buffer, se restaura automáticamente al cursor anterior del mapa.
+
+---
+
 ## 📚 Documentación Creada
 
 | Documento | Descripción | Líneas |

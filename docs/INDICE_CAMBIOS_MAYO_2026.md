@@ -12,8 +12,11 @@
 |---------|--------|---------|
 | `plugin/ui/detalle_afiliado_dialog.py` | **Rediseño completo** - Pestañas, una columna, "No especificado" | ⭐⭐⭐ Alto |
 | `plugin/modules/map_tools.py` | **Eliminación** - Capas temporales, código limpiado | ⭐⭐ Medio |
-| `plugin/utils/catalogos.py` | *(Creado antes)* - Sistema de catálogos | ⭐⭐⭐ Alto |
+| `plugin/utils/catalogos.py` | *(Creado antes / ampliado v2.2)* - Sistema de catálogos + locación + jefe núcleo | ⭐⭐⭐ Alto |
 | `plugin/utils/__init__.py` | *(Creado antes)* - Exports del módulo | ⭐ Bajo |
+| `plugin/ui/main_dialog.py` | **v2.2** - Leyenda colores, buffer mejorado, cursor restaurado | ⭐⭐⭐ Alto |
+| `plugin/utils/pdf_exporter.py` | **v2.2** - PDF actualizado con todos los catálogos | ⭐⭐ Medio |
+| `plugin/modules/access_importer.py` | **v2.2** - Corrección falsos positivos cambio dirección | ⭐⭐⭐ Alto |
 | `README.md` | **Actualizado** - Nuevas secciones v2.1 | ⭐⭐ Medio |
 
 ---
@@ -94,6 +97,28 @@
 
 ---
 
+### 🔄 Segunda Tanda — v2.2 (25 mayo 2026)
+
+**Archivos:**
+- `plugin/ui/main_dialog.py`
+- `plugin/ui/detalle_afiliado_dialog.py`
+- `plugin/utils/catalogos.py`
+- `plugin/utils/pdf_exporter.py`
+- `plugin/modules/access_importer.py`
+
+**Cambios implementados:**
+- ✅ Leyenda de colores en tablas (verde=sin ubicar, azul=cambio dirección)
+- ✅ Jefe de Núcleo se muestra como "Sí" / "No"
+- ✅ Locación se muestra como "Urbana" / "Rural"
+- ✅ Descripciones sin código entre paréntesis
+- ✅ PDF actualizado con todos los catálogos
+- ✅ Corrección falsos positivos cambio de dirección en importación
+- ✅ Botón "Generar Buffer" deshabilitado hasta seleccionar centro
+- ✅ Mensaje de éxito al generar buffer
+- ✅ "Limpiar Buffer" restaura cursor del mapa
+
+---
+
 ### 📄 Documentación
 
 **Archivos nuevos:** 5 documentos (1,550 líneas)
@@ -113,10 +138,10 @@
 
 | Métrica | Cantidad |
 |---------|----------|
-| Archivos modificados | 5 |
-| Líneas agregadas | ~300 |
+| Archivos modificados | 8 |
+| Líneas agregadas | ~450 |
 | Líneas eliminadas | ~70 |
-| **Líneas netas** | **+230** |
+| **Líneas netas** | **+380** |
 | Complejidad | Reducida ⬇️ |
 
 ### Documentación
@@ -133,10 +158,10 @@
 
 | Métrica | Cantidad |
 |---------|----------|
-| Funcionalidades agregadas | 8 |
+| Funcionalidades agregadas | 16 |
 | Funcionalidades eliminadas | 2 |
-| Funcionalidades mejoradas | 5 |
-| Bugs corregidos | 0 (no había) |
+| Funcionalidades mejoradas | 8 |
+| Bugs corregidos | 1 (falso positivo cambio dirección) |
 
 ---
 

@@ -58,9 +58,23 @@ Códigos del 00 al 16 que describen cómo se desplaza el afiliado:
 | 15 | Silla de ruedas + Bastón/Muleta + Prótesis + Aparato Ortopédico |
 | 16 | Camina sin ayuda |
 
----
+### 3. Locación _(añadido v2.2)_
 
-## 📁 Estructura de Archivos
+Indica si el afiliado reside en zona urbana o rural:
+
+| Código | Descripción |
+|--------|-------------|
+| 1      | Urbana      |
+| 2      | Rural       |
+
+### 4. Jefe de Núcleo _(añadido v2.2)_
+
+Indica si el afiliado es jefe del núcleo familiar. El campo almacena varios formatos posibles provenientes de Access:
+
+| Valores en Access | Descripción mostrada |
+|-------------------|----------------------|
+| S, SI, Sí, 1, TRUE, YES, Y | Sí |
+| N, NO, 0, FALSE, cualquier otro | No |
 
 ```
 plugin/
@@ -88,30 +102,53 @@ AMBULACION = {
     '01': 'Silla de Ruedas',
     # ...
 }
+
+# Añadidos en v2.2
+LOCACION = {
+    '1': 'Urbana',
+    '2': 'Rural',
+}
 ```
 
 **Funciones principales:**
 
 1. **`get_limitacion_descripcion(codigo)`**
    - Entrada: código (ej: '01', '1', 1, None)
-   - Salida: `"Amputado en 1 Pierna (01)"` o `"No especificado"`
+   - Salida: `"Amputado en 1 Pierna"` o `"No especificado"`
    
 2. **`get_ambulacion_descripcion(codigo)`**
    - Entrada: código (ej: '08', '8', 8, None)
-   - Salida: `"Bastón/Muleta + Prótesis (08)"` o `"No especificado"`
+   - Salida: `"Bastón/Muleta + Prótesis"` o `"No especificado"`
 
-3. **`get_limitacion_codigo_y_descripcion(codigo)`**
+3. **`get_locacion_descripcion(codigo)`** _(añadido v2.2)_
+   - Entrada: '1', '2' o None
+   - Salida: `"Urbana"`, `"Rural"` o `"No especificado"`
+
+4. **`get_jefe_nucleo_descripcion(valor)`** _(añadido v2.2)_
+   - Entrada: 'S', 'SI', 'Sí', '1', 'TRUE', 'YES', 'Y', 'N', '0', etc.
+   - Salida: `"Sí"` o `"No"`
+
+5. **`get_causa_descripcion(codigo)`**
+   - Salida: descripción de la causa de la discapacidad o `"No especificado"`
+
+6. **`get_ocupacion_descripcion(codigo)`**
+   - Salida: descripción de la ocupación o `"No especificado"`
+
+7. **`get_grado_escolar_descripcion(codigo)`**
+   - Salida: descripción del grado escolar o `"No especificado"`
+
+8. **`get_limitacion_codigo_y_descripcion(codigo)`**
    - Retorna tupla: `('01', 'Amputado en 1 Pierna')`
    
-4. **`get_ambulacion_codigo_y_descripcion(codigo)`**
+9. **`get_ambulacion_codigo_y_descripcion(codigo)`**
    - Retorna tupla: `('08', 'Bastón/Muleta + Prótesis')`
 
-5. **`get_todas_limitaciones()`**
-   - Retorna lista: `[('01', 'Amputado en 1 Pierna'), ...]`
-   - Útil para llenar ComboBox o listas
+10. **`get_todas_limitaciones()`**
+    - Retorna lista: `[('01', 'Amputado en 1 Pierna'), ...]`
+    - Útil para llenar ComboBox o listas
 
-6. **`get_todas_ambulaciones()`**
-   - Retorna lista: `[('00', 'Encamado Permanente'), ...]`
+11. **`get_todas_ambulaciones()`**
+    - Retorna lista: `[('00', 'Encamado Permanente'), ...]`
 
 ---
 
@@ -129,12 +166,20 @@ self.add_field(layout, row, "Código:", self.afiliado.get('limitacion_cod'))
 
 **Ahora:**
 ```python
-from utils.catalogos import get_limitacion_descripcion
+from utils.catalogos import (
+    get_limitacion_descripcion, get_locacion_descripcion,
+    get_jefe_nucleo_descripcion
+)
 
 limitacion_cod = self.afiliado.get('limitacion_cod')
 limitacion_desc = get_limitacion_descripcion(limitacion_cod)
-self.add_field(layout, row, "Limitación:", limitacion_desc, span=3)
-# Output: "Limitación: Amputado en 1 Pierna (01)"
+# Output: "Limitación: Amputado en 1 Pierna"
+
+locacion_desc = get_locacion_descripcion(self.afiliado.get('locacion'))
+# Output: "Urbana" o "Rural"
+
+jefe_desc = get_jefe_nucleo_descripcion(self.afiliado.get('jefe_nucleo'))
+# Output: "Sí" o "No"
 ```
 
 ### En Formularios o ComboBox
@@ -186,12 +231,16 @@ get_limitacion_descripcion('  ')     # → "No especificado"
 get_limitacion_descripcion('99')     # → "Código 99 (no definido)"
 ```
 
-### 4. Formato Consistente
-Todas las descripciones incluyen el código entre paréntesis:
+### 4. Formato Limpio (v2.2)
+Las descripciones ya **no incluyen** el código entre paréntesis. Se muestra únicamente el texto descriptivo:
 ```
-"Amputado en 1 Pierna (01)"
-"Silla de Ruedas (01)"
+"Amputado en 1 Pierna"
+"Silla de Ruedas"
+"Urbana"
+"Sí"
 ```
+
+> **Nota:** Los campos de formulario y combos que necesiten mostrar el código deben concatenarlo manualmente: `f"{desc} ({cod})"`.
 
 ---
 
