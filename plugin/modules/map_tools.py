@@ -467,3 +467,125 @@ def get_or_create_centros_layer():
         print("[PLUGIN] No hay configuración de BD para centros")
     
     return None
+
+
+def force_reload_centros_layer():
+    """
+    Elimina y recarga completamente la capa de centros desde PostGIS.
+    Replica el patrón estable usado en afiliados y preserva el estilo.
+    """
+    from qgis.PyQt.QtXml import QDomDocument
+    from qgis.utils import iface as qgis_iface
+
+    layer_name = "Centros de Interés"
+    style_xml = None
+
+    layer_id_to_remove = None
+    for layer_id, layer in list(QgsProject.instance().mapLayers().items()):
+        if layer.name() == layer_name:
+            doc = QDomDocument()
+            layer.exportNamedStyle(doc)
+            style_xml = doc.toString()
+            layer_id_to_remove = layer_id
+            break
+
+    if layer_id_to_remove:
+        QgsProject.instance().removeMapLayer(layer_id_to_remove)
+        print(f"[PLUGIN] Capa '{layer_name}' eliminada para recarga completa")
+
+    new_layer = get_or_create_centros_layer()
+
+    if new_layer and style_xml:
+        doc = QDomDocument()
+        doc.setContent(style_xml)
+        new_layer.importNamedStyle(doc)
+        new_layer.triggerRepaint()
+
+    if new_layer:
+        qgis_iface.mapCanvas().refresh()
+        print(f"[PLUGIN] Capa '{layer_name}' recargada: {new_layer.featureCount()} features")
+
+    return new_layer
+
+
+def highlight_centros_by_ids(centro_ids):
+    """
+    Resalta centros de interés en el mapa usando selección de la capa.
+
+    Args:
+        centro_ids: lista de IDs de centros a resaltar. Lista vacía quita la selección.
+    """
+    from qgis.utils import iface as qgis_iface
+
+    layer = get_or_create_centros_layer()
+    if not layer:
+        return False
+
+    try:
+        ids = [int(c_id) for c_id in centro_ids] if centro_ids else []
+        layer.removeSelection()
+
+        if ids:
+            layer.selectByIds(ids)
+
+        layer.triggerRepaint()
+        qgis_iface.mapCanvas().refresh()
+        return True
+    except Exception as e:
+        print(f"[PLUGIN] Error al resaltar centros: {e}")
+        return False
+
+
+def clear_centros_highlight():
+    """Quita el resaltado de centros de interés en el mapa."""
+    return highlight_centros_by_ids([])
+
+
+def add_buffer_layer(lon, lat, radio_metros, nombre_centro):
+    """
+    Agrega el polígono buffer como una capa de memoria al proyecto QGIS.
+    Así aparece en el panel de capas y puede eliminarse manualmente.
+
+    Returns:
+        str: ID de la capa creada, o None si falla.
+    """
+    from qgis.PyQt.QtGui import QColor
+    from qgis.core import (QgsVectorLayer, QgsFeature, QgsGeometry, QgsPointXY,
+                            QgsCoordinateReferenceSystem, QgsCoordinateTransform,
+                            QgsProject, QgsSingleSymbolRenderer, QgsFillSymbol)
+    try:
+        crs_4326 = QgsCoordinateReferenceSystem("EPSG:4326")
+        crs_3857 = QgsCoordinateReferenceSystem("EPSG:3857")
+
+        # Calcular buffer en sistema métrico (EPSG:3857), luego volver a 4326
+        point_geom = QgsGeometry.fromPointXY(QgsPointXY(float(lon), float(lat)))
+        to_metric = QgsCoordinateTransform(crs_4326, crs_3857, QgsProject.instance())
+        to_4326 = QgsCoordinateTransform(crs_3857, crs_4326, QgsProject.instance())
+        point_geom.transform(to_metric)
+        buffer_geom = point_geom.buffer(float(radio_metros), 64)
+        buffer_geom.transform(to_4326)
+
+        layer_name = f"Buffer: {nombre_centro} ({radio_metros} m)"
+        layer = QgsVectorLayer("Polygon?crs=EPSG:4326", layer_name, "memory")
+        provider = layer.dataProvider()
+
+        feature = QgsFeature()
+        feature.setGeometry(buffer_geom)
+        provider.addFeature(feature)
+        layer.updateExtents()
+
+        # Estilo: morado translúcido igual al rubber band
+        symbol = QgsFillSymbol.createSimple({
+            'color': '180,120,255,60',
+            'outline_color': '180,120,255,200',
+            'outline_width': '0.5'
+        })
+        layer.setRenderer(QgsSingleSymbolRenderer(symbol))
+
+        QgsProject.instance().addMapLayer(layer)
+        print(f"[PLUGIN] Capa buffer '{layer_name}' agregada al proyecto")
+        return layer.id()
+
+    except Exception as e:
+        print(f"[PLUGIN] Error al agregar capa buffer: {e}")
+        return None

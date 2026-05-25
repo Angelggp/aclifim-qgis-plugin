@@ -33,12 +33,15 @@ from ..modules.map_tools import (
     get_or_create_layer,
     add_point_with_data,
     force_reload_afiliados_layer,
+    force_reload_centros_layer,
     highlight_afiliados_by_ids,
     clear_afiliados_highlight,
-    draw_centro_buffer
+    draw_centro_buffer,
+    highlight_centros_by_ids,
+    clear_centros_highlight,
+    add_buffer_layer
 )
 from .afiliado_form import AfiliadoForm
-from .resumen_afiliado_dialog import ResumenAfiliadoDialog
 from .db_config_dialog import DatabaseConfigDialog
 from .centro_interes_form import CentroInteresForm
 from ..modules.access_importer import (
@@ -61,6 +64,15 @@ from ..modules.centros_interes_manager import (
 from ..utils.pdf_exporter import PDFExporter
 
 
+class NumericTableWidgetItem(QTableWidgetItem):
+    """QTableWidgetItem que ordena numéricamente la columna ID."""
+    def __lt__(self, other):
+        try:
+            return int(self.text()) < int(other.text())
+        except (ValueError, TypeError):
+            return super().__lt__(other)
+
+
 class MainDialog(QDialog):
     def __init__(self, iface):
         super().__init__()
@@ -68,6 +80,7 @@ class MainDialog(QDialog):
         self.map_tool = None
         self.rubber_band = None
         self.buffer_rubber_band = None
+        self.buffer_layer_id = None
         self.search_highlight_ids = []
         self.buffer_highlight_ids = []
 
@@ -165,10 +178,10 @@ class MainDialog(QDialog):
         self.filter_apellido.setPlaceholderText("Buscar por apellido...")
         filter_layout.addWidget(self.filter_apellido, 0, 3)
         
-        # Fila 2: Código y CI
-        filter_layout.addWidget(QLabel("Código:"), 1, 0)
+        # Fila 2: ID y CI
+        filter_layout.addWidget(QLabel("ID:"), 1, 0)
         self.filter_codigo = QLineEdit()
-        self.filter_codigo.setPlaceholderText("Buscar por código...")
+        self.filter_codigo.setPlaceholderText("Buscar por ID...")
         filter_layout.addWidget(self.filter_codigo, 1, 1)
         
         filter_layout.addWidget(QLabel("CI:"), 1, 2)
@@ -181,6 +194,7 @@ class MainDialog(QDialog):
         self.filter_estado = QComboBox()
         self.filter_estado.addItems(["Todos", "Sin ubicar", "Cambio de dirección", "Ubicados"])
         filter_layout.addWidget(self.filter_estado, 2, 1)
+        self.filter_estado.currentIndexChanged.connect(self.load_all_afiliados)
         
         # Botones de filtro
         btn_filter_layout = QHBoxLayout()
@@ -202,6 +216,18 @@ class MainDialog(QDialog):
         self.label_resultados = QLabel("Total: 0 afiliados")
         self.label_resultados.setStyleSheet("font-weight: bold; color: #0066cc;")
         layout.addWidget(self.label_resultados)
+
+        # Leyenda de colores
+        legend_layout = QHBoxLayout()
+        legend_layout.addWidget(QLabel("Leyenda:"))
+        lbl_sin_ubicar = QLabel("  Sin ubicar  ")
+        lbl_sin_ubicar.setStyleSheet("background-color: rgb(144,238,144); padding: 2px 8px;")
+        legend_layout.addWidget(lbl_sin_ubicar)
+        lbl_cambio = QLabel("  Cambio de dirección  ")
+        lbl_cambio.setStyleSheet("background-color: rgb(135,206,250); padding: 2px 8px;")
+        legend_layout.addWidget(lbl_cambio)
+        legend_layout.addStretch()
+        layout.addLayout(legend_layout)
         
         # Tabla (SOLO 5 COLUMNAS: ID, CI, Nombre, Apellido, Dirección)
         self.table_all = QTableWidget()
@@ -215,6 +241,9 @@ class MainDialog(QDialog):
         self.table_all.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table_all.customContextMenuRequested.connect(self.mostrar_menu_contextual_afiliado)
         
+        # Ordenamiento al pulsar cabeceras
+        self.table_all.setSortingEnabled(True)
+
         # Ajustar columnas
         header = self.table_all.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -241,7 +270,7 @@ class MainDialog(QDialog):
         self.btn_ubicar_afiliado.setEnabled(False)
         btn_layout.addWidget(self.btn_ubicar_afiliado)
 
-        self.btn_resumen_mapa = QPushButton("Resumen en Mapa")
+        self.btn_resumen_mapa = QPushButton("Ver en Mapa")
         self.btn_resumen_mapa.clicked.connect(self.activar_resumen_mapa)
         btn_layout.addWidget(self.btn_resumen_mapa)
         
@@ -278,15 +307,15 @@ class MainDialog(QDialog):
         # Leyenda de colores
         legend_layout = QHBoxLayout()
         legend_layout.addWidget(QLabel("Leyenda:"))
-        
-        label_nuevo = QLabel("■ Nuevo")
-        label_nuevo.setStyleSheet("color: #0099cc; font-weight: bold;")
-        legend_layout.addWidget(label_nuevo)
-        
-        label_cambio = QLabel("■ Cambio Dirección")
-        label_cambio.setStyleSheet("color: #ff9900; font-weight: bold;")
-        legend_layout.addWidget(label_cambio)
-        
+
+        lbl_sin_ubicar = QLabel("  Sin ubicar  ")
+        lbl_sin_ubicar.setStyleSheet("background-color: rgb(144,238,144); padding: 2px 8px;")
+        legend_layout.addWidget(lbl_sin_ubicar)
+
+        lbl_cambio = QLabel("  Cambio de dirección  ")
+        lbl_cambio.setStyleSheet("background-color: rgb(135,206,250); padding: 2px 8px;")
+        legend_layout.addWidget(lbl_cambio)
+
         legend_layout.addStretch()
         layout.addLayout(legend_layout)
         
@@ -382,6 +411,9 @@ class MainDialog(QDialog):
         self.table_centros.setSelectionMode(QTableWidget.SingleSelection)
         self.table_centros.setEditTriggers(QTableWidget.NoEditTriggers)
         
+        # Ordenamiento al pulsar cabeceras
+        self.table_centros.setSortingEnabled(True)
+
         # Ajustar columnas
         header = self.table_centros.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -405,7 +437,13 @@ class MainDialog(QDialog):
 
         self.btn_generar_buffer = QPushButton("⭕ Generar Buffer")
         self.btn_generar_buffer.clicked.connect(self.generar_buffer_centro)
+        self.btn_generar_buffer.setEnabled(False)
         buffer_controls.addWidget(self.btn_generar_buffer)
+
+        self.btn_ver_buffer_mapa = QPushButton("Ver en Mapa")
+        self.btn_ver_buffer_mapa.clicked.connect(self.activar_consulta_buffer_mapa)
+        self.btn_ver_buffer_mapa.setEnabled(False)
+        buffer_controls.addWidget(self.btn_ver_buffer_mapa)
 
         self.btn_limpiar_buffer = QPushButton("🧹 Limpiar Buffer")
         self.btn_limpiar_buffer.clicked.connect(self.limpiar_buffer_centro)
@@ -635,6 +673,7 @@ class MainDialog(QDialog):
         elif estado_filtro == "Ubicados":
             afiliados = [a for a in afiliados if a.get('lon') is not None and a.get('lat') is not None and a.get('estado') == 'normal']
         
+        self.table_all.setSortingEnabled(False)
         self.table_all.setRowCount(0)
         
         for afiliado in afiliados:
@@ -642,7 +681,7 @@ class MainDialog(QDialog):
             self.table_all.insertRow(row)
             
             # SOLO 5 COLUMNAS: ID, CI, Nombre, Apellido, Dirección
-            self.table_all.setItem(row, 0, QTableWidgetItem(str(afiliado['id'])))
+            self.table_all.setItem(row, 0, NumericTableWidgetItem(str(afiliado['id'])))
             self.table_all.setItem(row, 1, QTableWidgetItem(afiliado['carnet_id']))
             self.table_all.setItem(row, 2, QTableWidgetItem(afiliado['nombres']))
             self.table_all.setItem(row, 3, QTableWidgetItem(afiliado['apellidos']))
@@ -656,8 +695,7 @@ class MainDialog(QDialog):
                     if item:
                         item.setBackground(color)
         
-        self.label_resultados.setText(f"Total: {len(afiliados)} afiliados")
-        self.search_highlight_ids = []
+        self.table_all.setSortingEnabled(True)
         print(f"[PLUGIN] {len(afiliados)} afiliados cargados en tabla")
     
     def buscar_afiliados(self):
@@ -673,7 +711,7 @@ class MainDialog(QDialog):
         afiliados = search_afiliados(
             nombre=nombre if nombre else None,
             apellido=apellido if apellido else None,
-            codigo=codigo if codigo else None,
+            pk_id=codigo if codigo else None,
             carnet_id=ci if ci else None
         )
         
@@ -686,13 +724,14 @@ class MainDialog(QDialog):
             afiliados = [a for a in afiliados if a.get('lon') is not None and a.get('lat') is not None and a.get('estado') == 'normal']
         
         # Mostrar resultados
+        self.table_all.setSortingEnabled(False)
         self.table_all.setRowCount(0)
         
         for afiliado in afiliados:
             row = self.table_all.rowCount()
             self.table_all.insertRow(row)
             
-            self.table_all.setItem(row, 0, QTableWidgetItem(str(afiliado['id'])))
+            self.table_all.setItem(row, 0, NumericTableWidgetItem(str(afiliado['id'])))
             self.table_all.setItem(row, 1, QTableWidgetItem(afiliado['carnet_id']))
             self.table_all.setItem(row, 2, QTableWidgetItem(afiliado['nombres']))
             self.table_all.setItem(row, 3, QTableWidgetItem(afiliado['apellidos']))
@@ -705,6 +744,8 @@ class MainDialog(QDialog):
                     item = self.table_all.item(row, col)
                     if item:
                         item.setBackground(color)
+        
+        self.table_all.setSortingEnabled(True)
         
         self.label_resultados.setText(f"Resultados: {len(afiliados)} afiliados encontrados")
         self.search_highlight_ids = [a['id'] for a in afiliados]
@@ -770,12 +811,35 @@ class MainDialog(QDialog):
         dialog.exec_()
 
     def activar_resumen_mapa(self):
-        """Activa seleccion puntual en mapa para abrir resumen rapido de afiliado."""
+        """Si hay afiliado seleccionado con coords, centra el mapa en él primero.
+        Luego siempre minimiza y activa modo clic en mapa."""
+        from qgis.core import (QgsPointXY, QgsCoordinateReferenceSystem,
+                                QgsCoordinateTransform, QgsProject)
+
+        selected_rows = self.table_all.selectionModel().selectedRows()
+        if selected_rows:
+            row = selected_rows[0].row()
+            afiliado_id = int(self.table_all.item(row, 0).text())
+            afiliado = get_afiliado_by_id(afiliado_id)
+            if afiliado and afiliado.get('lon') is not None and afiliado.get('lat') is not None:
+                canvas = self.iface.mapCanvas()
+                lon, lat = float(afiliado['lon']), float(afiliado['lat'])
+                src_crs = QgsCoordinateReferenceSystem('EPSG:4326')
+                canvas_crs = canvas.mapSettings().destinationCrs()
+                point = QgsPointXY(lon, lat)
+                if canvas_crs.authid() != src_crs.authid():
+                    transform = QgsCoordinateTransform(src_crs, canvas_crs, QgsProject.instance())
+                    point = transform.transform(point)
+                canvas.setCenter(point)
+                canvas.zoomScale(2000)
+                canvas.refresh()
+
+        # Siempre minimizar y entrar en modo clic
         canvas = self.iface.mapCanvas()
         self.previous_map_tool = canvas.mapTool()
         self.map_tool = MapClickTool(canvas, self.on_resumen_map_clicked)
         canvas.setMapTool(self.map_tool)
-
+        self.showMinimized()
         self.iface.messageBar().pushMessage(
             "ACLIFIM",
             "Haz clic sobre un afiliado en el mapa para ver su resumen.",
@@ -784,7 +848,7 @@ class MainDialog(QDialog):
         )
 
     def on_resumen_map_clicked(self, point):
-        """Maneja el clic en mapa para mostrar dialogo resumido de afiliado."""
+        """Maneja el clic en mapa para mostrar detalles de afiliado."""
         from qgis.core import QgsCoordinateTransform, QgsGeometry, QgsRectangle
 
         afiliado_id = None
@@ -832,18 +896,12 @@ class MainDialog(QDialog):
             except Exception as e:
                 print(f"[PLUGIN] Error al identificar afiliado en mapa: {e}")
 
-        # Restaurar herramienta de mapa
-        canvas = self.iface.mapCanvas()
-        if hasattr(self, 'previous_map_tool') and self.previous_map_tool:
-            canvas.setMapTool(self.previous_map_tool)
-        else:
-            canvas.unsetMapTool(self.map_tool)
-
         if afiliado_id is None:
-            QMessageBox.information(
-                self,
-                "Sin afiliado",
-                "No se encontro un afiliado en el punto seleccionado."
+            self.iface.messageBar().pushMessage(
+                "ACLIFIM",
+                "No se encontró un afiliado en el punto seleccionado.",
+                level=0,
+                duration=3
             )
             return
 
@@ -852,7 +910,8 @@ class MainDialog(QDialog):
             QMessageBox.warning(self, "Advertencia", "No se pudieron cargar los datos del afiliado.")
             return
 
-        dialog = ResumenAfiliadoDialog(afiliado, self)
+        from .detalle_afiliado_dialog import DetalleAfiliadoDialog
+        dialog = DetalleAfiliadoDialog(afiliado, None, self.iface, compact=True)
         dialog.exec_()
     
     def mostrar_menu_contextual_afiliado(self, position):
@@ -867,11 +926,6 @@ class MainDialog(QDialog):
         # Crear menú
         menu = QMenu()
         
-        # Obtener ID del afiliado para verificar si tiene coordenadas
-        row = sender.selectionModel().selectedRows()[0].row()
-        afiliado_id = int(sender.item(row, 0).text())
-        afiliado = get_afiliado_by_id(afiliado_id)
-        
         # Acción: Ver detalles
         action_detalles = QAction("📋 Ver Detalles", self)
         action_detalles.triggered.connect(lambda: self.ver_detalles_desde_menu(sender))
@@ -881,13 +935,6 @@ class MainDialog(QDialog):
         action_pdf = QAction("📄 Exportar a PDF", self)
         action_pdf.triggered.connect(lambda: self.exportar_afiliado_pdf(sender))
         menu.addAction(action_pdf)
-        
-        # Acción: Cambiar Dirección (solo si tiene coordenadas)
-        if afiliado and afiliado.get('lon') is not None and afiliado.get('lat') is not None:
-            menu.addSeparator()
-            action_cambiar_dir = QAction("📍 Cambiar Dirección", self)
-            action_cambiar_dir.triggered.connect(lambda: self.cambiar_direccion_desde_menu(sender))
-            menu.addAction(action_cambiar_dir)
         
         # Mostrar menú en la posición del cursor
         menu.exec_(sender.viewport().mapToGlobal(position))
@@ -933,69 +980,6 @@ class MainDialog(QDialog):
         exporter = PDFExporter()
         exporter.export_afiliado(afiliado, self)
     
-    def cambiar_direccion_desde_menu(self, tabla):
-        """Cambia dirección de afiliado desde menú contextual"""
-        selected_rows = tabla.selectionModel().selectedRows()
-        if not selected_rows:
-            return
-        
-        row = selected_rows[0].row()
-        afiliado_id = int(tabla.item(row, 0).text())
-        
-        # Obtener detalles completos
-        afiliado = get_afiliado_by_id(afiliado_id)
-        
-        if not afiliado:
-            QMessageBox.critical(self, "Error", "No se pudo cargar los detalles del afiliado")
-            return
-        
-        # Verificar que tenga coordenadas
-        if afiliado.get('lon') is None or afiliado.get('lat') is None:
-            QMessageBox.warning(self, "Advertencia", "Este afiliado no tiene coordenadas asignadas")
-            return
-        
-        # Mostrar diálogo de confirmación
-        from .cambio_direccion_dialog import CambioDireccionDialog
-        nombre_completo = f"{afiliado.get('nombres', '')} {afiliado.get('apellidos', '')}" .strip()
-        dialog = CambioDireccionDialog(nombre_completo, self)
-        
-        if dialog.exec_() == QDialog.Accepted:
-            motivo = dialog.get_motivo()
-            
-            # Llamar a la función que elimina geometría y cambia estado
-            from ..modules.access_importer import cambiar_direccion_afiliado
-            success, msg = cambiar_direccion_afiliado(afiliado_id, motivo)
-            
-            if success:
-                QMessageBox.information(
-                    self,
-                    "Cambio Registrado",
-                    f"El cambio de dirección se registró correctamente.\n\n"
-                    f"El afiliado '{nombre_completo}' ahora aparecerá en la lista 'Sin Ubicar'.\n"
-                    f"Ubíquelo nuevamente en el mapa desde esa lista."
-                )
-                # Recargar datos y refrescar mapa
-                try:
-                    self.load_all_afiliados()
-                except Exception as e:
-                    print(f"[PLUGIN] Error al recargar afiliados: {e}")
-                
-                try:
-                    self.load_unlocated_afiliados()
-                except Exception as e:
-                    print(f"[PLUGIN] Error al recargar sin ubicar: {e}")
-                
-                try:
-                    self.refresh_layer()
-                except Exception as e:
-                    print(f"[PLUGIN] Error al refrescar capa: {e}")
-            else:
-                QMessageBox.critical(
-                    self,
-                    "Error",
-                    f"No se pudo registrar el cambio de dirección:\n\n{msg}"
-                )
-    
     def ubicar_afiliado_desde_gestion(self):
         """Activa el modo de ubicar afiliado desde la pestaña de gestión"""
         selected_rows = self.table_all.selectionModel().selectedRows()
@@ -1020,7 +1004,20 @@ class MainDialog(QDialog):
             QMessageBox.information(
                 self,
                 "Afiliado ya ubicado",
-                f"{nombre} {apellido} ya tiene coordenadas.\n\nSi deseas cambiarlo, primero debes marcarlo como cambio de dirección desde Access."
+                f"{nombre} {apellido} ya tiene coordenadas.\n\n"
+                "La ubicación no se cambia desde el software. "
+                "Si cambió en Access, importa nuevamente para detectar el cambio automáticamente."
+            )
+            return
+        
+        # Validar que no esté de baja
+        area = str(afiliado.get('area', '') or '').strip().lower()
+        motivo_baja = str(afiliado.get('motivo_baja', '') or '').strip()
+        if area == 'baja' or motivo_baja:
+            QMessageBox.warning(
+                self,
+                "Afiliado de Baja",
+                f"{nombre} {apellido} está registrado como baja y no puede ser ubicado en el mapa."
             )
             return
         
@@ -1115,10 +1112,23 @@ class MainDialog(QDialog):
         row = self.table_unlocated.currentRow()
         afiliado_id = int(self.table_unlocated.item(row, 0).text())
         nombre = self.table_unlocated.item(row, 1).text()
+
+        # Validar que no esté de baja
+        afiliado_check = get_afiliado_by_id(afiliado_id)
+        if afiliado_check:
+            area = str(afiliado_check.get('area', '') or '').strip().lower()
+            motivo_baja = str(afiliado_check.get('motivo_baja', '') or '').strip()
+            if area == 'baja' or motivo_baja:
+                QMessageBox.warning(
+                    self,
+                    "Afiliado de Baja",
+                    f"'{nombre}' está registrado como baja y no puede ser ubicado en el mapa."
+                )
+                return
         
         # Guardar ID para callback
         self.selected_afiliado_id = afiliado_id
-        
+
         # Activar herramienta de click
         canvas = self.iface.mapCanvas()
         self.previous_map_tool = canvas.mapTool()
@@ -1236,8 +1246,7 @@ class MainDialog(QDialog):
     def load_centros_layer(self):
         """Carga o recarga la capa de centros de interés desde PostGIS"""
         try:
-            from ..modules.map_tools import get_or_create_centros_layer
-            layer = get_or_create_centros_layer()
+            layer = force_reload_centros_layer()
             
             if layer:
                 print(f"[PLUGIN] Capa de centros cargada: {layer.name()}")
@@ -1297,11 +1306,148 @@ class MainDialog(QDialog):
                 pass
             self.buffer_rubber_band = None
 
+        # Eliminar capa buffer del proyecto si existe
+        if hasattr(self, 'buffer_layer_id') and self.buffer_layer_id:
+            try:
+                QgsProject.instance().removeMapLayer(self.buffer_layer_id)
+            except Exception:
+                pass
+            self.buffer_layer_id = None
+
+        # Si la herramienta activa es la del buffer, restaurar la anterior
+        canvas = self.iface.mapCanvas()
+        if self.map_tool is not None and canvas.mapTool() == self.map_tool:
+            prev = getattr(self, 'previous_map_tool', None)
+            if prev is not None:
+                canvas.setMapTool(prev)
+            else:
+                canvas.unsetMapTool(self.map_tool)
+            self.map_tool = None
+
         self.buffer_highlight_ids = []
+        if hasattr(self, 'btn_ver_buffer_mapa'):
+            self.btn_ver_buffer_mapa.setEnabled(False)
         self.table_buffer_afiliados.setRowCount(0)
         self.label_buffer_resultados.setText("Buffer: sin análisis")
         self._apply_map_highlight()
-        self.iface.mapCanvas().refresh()
+        canvas.refresh()
+
+    def activar_consulta_buffer_mapa(self):
+        """Si hay afiliado seleccionado en la tabla buffer con coords, centra el mapa primero.
+        Luego siempre minimiza y activa modo clic en mapa para consulta dentro del buffer."""
+        from qgis.core import (QgsPointXY, QgsCoordinateReferenceSystem,
+                                QgsCoordinateTransform, QgsProject)
+
+        if not self.buffer_highlight_ids:
+            QMessageBox.information(
+                self,
+                "Sin afiliados",
+                "No hay afiliados dentro del buffer para consultar en el mapa."
+            )
+            return
+
+        # Si hay selección en tabla buffer con coords → centrar primero
+        selected_rows = self.table_buffer_afiliados.selectionModel().selectedRows()
+        if selected_rows:
+            row = selected_rows[0].row()
+            afiliado_id = int(self.table_buffer_afiliados.item(row, 0).text())
+            afiliado = get_afiliado_by_id(afiliado_id)
+            if afiliado and afiliado.get('lon') is not None and afiliado.get('lat') is not None:
+                canvas = self.iface.mapCanvas()
+                lon, lat = float(afiliado['lon']), float(afiliado['lat'])
+                src_crs = QgsCoordinateReferenceSystem('EPSG:4326')
+                canvas_crs = canvas.mapSettings().destinationCrs()
+                point = QgsPointXY(lon, lat)
+                if canvas_crs.authid() != src_crs.authid():
+                    transform = QgsCoordinateTransform(src_crs, canvas_crs, QgsProject.instance())
+                    point = transform.transform(point)
+                canvas.setCenter(point)
+                canvas.zoomScale(2000)
+                canvas.refresh()
+
+        # Siempre minimizar y entrar en modo clic
+        canvas = self.iface.mapCanvas()
+        self.previous_map_tool = canvas.mapTool()
+        self.map_tool = MapClickTool(canvas, self.on_buffer_map_clicked)
+        canvas.setMapTool(self.map_tool)
+        self.showMinimized()
+        self.iface.messageBar().pushMessage(
+            "ACLIFIM",
+            "Haz clic en un afiliado resaltado dentro del buffer para ver su información.",
+            level=0,
+            duration=6
+        )
+
+    def on_buffer_map_clicked(self, point):
+        """Maneja clic en mapa para abrir detalle de afiliado dentro del buffer."""
+        from qgis.core import QgsCoordinateTransform, QgsGeometry, QgsRectangle
+
+        afiliado_id = None
+        layer = get_or_create_layer()
+
+        if not layer:
+            QMessageBox.warning(self, "Advertencia", "No se pudo cargar la capa de afiliados.")
+        else:
+            try:
+                canvas = self.iface.mapCanvas()
+                canvas_crs = canvas.mapSettings().destinationCrs()
+                layer_crs = layer.crs()
+
+                click_point = point
+                if canvas_crs != layer_crs:
+                    transform = QgsCoordinateTransform(canvas_crs, layer_crs, QgsProject.instance())
+                    click_point = transform.transform(point)
+
+                tol = canvas.mapUnitsPerPixel() * 8
+                rect = QgsRectangle(
+                    click_point.x() - tol,
+                    click_point.y() - tol,
+                    click_point.x() + tol,
+                    click_point.y() + tol
+                )
+
+                click_geom = QgsGeometry.fromPointXY(QgsPointXY(click_point.x(), click_point.y()))
+                nearest_feature = None
+                nearest_dist = None
+                ids_permitidos = set(self.buffer_highlight_ids)
+
+                for feat in layer.getFeatures(rect):
+                    feat_id = feat['id']
+                    if feat_id is None or int(feat_id) not in ids_permitidos:
+                        continue
+
+                    geom = feat.geometry()
+                    if not geom or geom.isNull():
+                        continue
+
+                    dist = geom.distance(click_geom)
+                    if nearest_dist is None or dist < nearest_dist:
+                        nearest_dist = dist
+                        nearest_feature = feat
+
+                if nearest_feature is not None and nearest_feature['id'] is not None:
+                    afiliado_id = int(nearest_feature['id'])
+
+            except Exception as e:
+                print(f"[PLUGIN] Error al identificar afiliado en buffer: {e}")
+
+        if afiliado_id is None:
+            self.iface.messageBar().pushMessage(
+                "ACLIFIM",
+                "No se encontró un afiliado del buffer en el punto seleccionado.",
+                level=0,
+                duration=3
+            )
+            return
+
+        afiliado = get_afiliado_by_id(afiliado_id)
+        if not afiliado:
+            QMessageBox.warning(self, "Advertencia", "No se pudieron cargar los datos del afiliado.")
+            return
+
+        from .detalle_afiliado_dialog import DetalleAfiliadoDialog
+        dialog = DetalleAfiliadoDialog(afiliado, None, self.iface, compact=True)
+        dialog.exec_()
 
     def generar_buffer_centro(self):
         """Genera un buffer alrededor del centro seleccionado y lista afiliados dentro."""
@@ -1328,6 +1474,12 @@ class MainDialog(QDialog):
             radio_metros
         )
 
+        # Agregar buffer también como capa al panel de capas
+        centro_nombre = centro.get('nombre', f'ID {centro_id}')
+        self.buffer_layer_id = add_buffer_layer(
+            centro['lon'], centro['lat'], radio_metros, centro_nombre
+        )
+
         if not self.buffer_rubber_band:
             QMessageBox.warning(
                 self,
@@ -1352,12 +1504,11 @@ class MainDialog(QDialog):
             self.table_buffer_afiliados.setItem(table_row, 4, QTableWidgetItem(distancia_txt))
             self.table_buffer_afiliados.setItem(table_row, 5, QTableWidgetItem(afiliado.get('direccion', '')))
 
-        centro_nombre = centro.get('nombre', f"ID {centro_id}")
         self.label_buffer_resultados.setText(
             f"Buffer '{centro_nombre}' ({radio_metros} m): {len(afiliados)} afiliados"
         )
-
         self.buffer_highlight_ids = [a['id'] for a in afiliados]
+        self.btn_ver_buffer_mapa.setEnabled(len(self.buffer_highlight_ids) > 0)
         self._apply_map_highlight()
 
         if self.buffer_rubber_band:
@@ -1366,6 +1517,21 @@ class MainDialog(QDialog):
                 self.iface.mapCanvas().setExtent(buffer_geom.boundingBox())
 
         self.iface.mapCanvas().refresh()
+
+        if not self.buffer_highlight_ids:
+            self.iface.messageBar().pushMessage(
+                "ACLIFIM",
+                "Buffer generado sin afiliados dentro.",
+                level=0,
+                duration=4
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Buffer generado",
+                f"Buffer de {radio_metros} m alrededor de '{centro_nombre}' generado correctamente.\n"
+                f"{len(afiliados)} afiliado(s) encontrado(s) dentro del área."
+            )
     
     # --- Métodos de acciones ---
 
@@ -1633,6 +1799,16 @@ class MainDialog(QDialog):
                 f"  • Eliminados (bajas): {stats['eliminados']}\n"
                 f"  • Total procesados: {stats['total_procesados']}\n"
             )
+
+            afiliados_cambio = stats.get('afiliados_cambio_direccion') or []
+            if afiliados_cambio:
+                mensaje += "\nSe detectaron cambios de ubicación en Access:\n"
+                limite = 10
+                for nombre in afiliados_cambio[:limite]:
+                    mensaje += f"  • {nombre} cambió su ubicación.\n"
+                restantes = len(afiliados_cambio) - limite
+                if restantes > 0:
+                    mensaje += f"  • ... y {restantes} afiliado(s) más.\n"
             
             if stats['errores'] > 0:
                 mensaje += f"  ⚠️ Errores: {stats['errores']}\n"
@@ -1649,6 +1825,8 @@ class MainDialog(QDialog):
             
             # Actualizar tabla
             self.load_all_afiliados()
+            self.load_unlocated_afiliados()
+            self.refresh_layer()
         else:
             QMessageBox.critical(
                 self,
@@ -1675,6 +1853,7 @@ class MainDialog(QDialog):
                 centros = get_all_centros_interes()
             
             # Limpiar tabla
+            self.table_centros.setSortingEnabled(False)
             self.table_centros.setRowCount(0)
             
             # Llenar tabla
@@ -1683,7 +1862,7 @@ class MainDialog(QDialog):
                 self.table_centros.insertRow(row)
                 
                 # ID
-                self.table_centros.setItem(row, 0, QTableWidgetItem(str(centro['id'])))
+                self.table_centros.setItem(row, 0, NumericTableWidgetItem(str(centro['id'])))
                 
                 # Nombre
                 self.table_centros.setItem(row, 1, QTableWidgetItem(centro['nombre']))
@@ -1701,6 +1880,15 @@ class MainDialog(QDialog):
                 else:
                     coords = "Sin coordenadas"
                 self.table_centros.setItem(row, 4, QTableWidgetItem(coords))
+            
+            self.table_centros.setSortingEnabled(True)
+
+            # Resaltar en mapa si hay filtro activo; si no, quitar resaltado
+            if nombre_filtro or tipo_filtro:
+                ids_filtrados = [c['id'] for c in centros if c.get('lon') and c.get('lat')]
+                highlight_centros_by_ids(ids_filtrados)
+            else:
+                clear_centros_highlight()
             
             # Actualizar contador
             self.label_centros_resultados.setText(f"Total: {len(centros)} centros")
@@ -1729,6 +1917,7 @@ class MainDialog(QDialog):
         has_selection = len(self.table_centros.selectedItems()) > 0
         self.btn_editar_centro.setEnabled(has_selection)
         self.btn_eliminar_centro.setEnabled(has_selection)
+        self.btn_generar_buffer.setEnabled(has_selection)
     
     def agregar_centro_click(self):
         """Activa el modo de hacer clic en el mapa para agregar un centro"""
@@ -1742,6 +1931,9 @@ class MainDialog(QDialog):
         self.centro_tool = QgsMapToolEmitPoint(self.iface.mapCanvas())
         self.centro_tool.canvasClicked.connect(self.on_centro_map_clicked)
         self.iface.mapCanvas().setMapTool(self.centro_tool)
+
+        # Igual que afiliados: minimizar para permitir seleccionar punto en el mapa
+        self.showMinimized()
         print("[PLUGIN] Modo agregar centro activado")
     
     def on_centro_map_clicked(self, point, button):
@@ -1793,6 +1985,9 @@ class MainDialog(QDialog):
                 f"Error al agregar centro:\n{str(e)}"
             )
             print(f"[PLUGIN] Error en on_centro_map_clicked: {e}")
+        finally:
+            self.showNormal()
+            self.activateWindow()
     
     def editar_centro(self):
         """Edita el centro seleccionado"""

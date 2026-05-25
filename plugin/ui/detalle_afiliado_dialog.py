@@ -22,31 +22,44 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from utils.catalogos import get_limitacion_descripcion, get_ambulacion_descripcion
+from utils.catalogos import (
+    get_limitacion_descripcion,
+    get_ambulacion_descripcion,
+    get_causa_descripcion,
+    get_grado_escolar_descripcion,
+    get_motivo_baja_descripcion,
+    get_area_descripcion,
+    get_sexo_descripcion,
+    get_ocupacion_descripcion,
+    get_locacion_descripcion,
+    get_jefe_nucleo_descripcion
+)
 from utils.pdf_exporter import PDFExporter
-from .cambio_direccion_dialog import CambioDireccionDialog
 from ..modules.access_importer import (
     cambiar_direccion_afiliado,
     get_afiliado_foto_bytes,
     save_afiliado_foto_bytes,
     remove_afiliado_foto
 )
+from ..modules.map_tools import force_reload_afiliados_layer
 
 
 class DetalleAfiliadoDialog(QDialog):
     """Muestra los detalles de un afiliado en una vista unica y ordenada por secciones."""
 
-    def __init__(self, afiliado, parent=None, iface=None):
+    def __init__(self, afiliado, parent=None, iface=None, compact=False):
         super().__init__(parent)
         self.afiliado = afiliado
         self.iface = iface
+        self.compact = compact
         self.parent_dialog = parent
         self.photo_label = None
         self.photo_bytes = get_afiliado_foto_bytes(self.afiliado.get('id'))
 
         nombre_completo = f"{afiliado.get('nombres', '')} {afiliado.get('apellidos', '')}".strip()
         self.setWindowTitle(f"Detalles del Afiliado - {nombre_completo or 'Sin nombre'}")
-        self.resize(860, 760)
+        # Dimensiones unificadas para mantener coherencia en toda la app.
+        self.resize(700, 560)
 
         self.init_ui()
 
@@ -83,10 +96,10 @@ class DetalleAfiliadoDialog(QDialog):
         lon = self.afiliado.get('lon')
         lat = self.afiliado.get('lat')
         if lon is not None and lat is not None:
-            btn_cambiar_dir = QPushButton("Cambiar Direccion")
-            btn_cambiar_dir.clicked.connect(self.cambiar_direccion)
-            btn_cambiar_dir.setMinimumWidth(160)
-            btn_layout.addWidget(btn_cambiar_dir)
+            btn_eliminar_mapa = QPushButton("Eliminar del Mapa")
+            btn_eliminar_mapa.clicked.connect(self.eliminar_del_mapa)
+            btn_eliminar_mapa.setMinimumWidth(160)
+            btn_layout.addWidget(btn_eliminar_mapa)
 
         btn_pdf = QPushButton("Exportar PDF")
         btn_pdf.clicked.connect(self.exportar_pdf)
@@ -165,7 +178,7 @@ class DetalleAfiliadoDialog(QDialog):
 
         row = 0
         self.add_grid_field(grid, row, 0, "Folio:", self.afiliado.get('folio'))
-        self.add_grid_field(grid, row, 2, "Sexo:", self.afiliado.get('sexo'))
+        self.add_grid_field(grid, row, 2, "Sexo:", get_sexo_descripcion(self.afiliado.get('sexo')))
 
         row += 1
         self.add_grid_field(grid, row, 0, "Edad:", self.afiliado.get('edad'))
@@ -192,7 +205,7 @@ class DetalleAfiliadoDialog(QDialog):
         self.add_grid_field(grid, row, 2, "Reparto:", self.afiliado.get('reparto'))
 
         row += 1
-        self.add_grid_field(grid, row, 0, "Locacion:", self.afiliado.get('locacion'))
+        self.add_grid_field(grid, row, 0, "Locacion:", get_locacion_descripcion(self.afiliado.get('locacion')))
         self.add_grid_field(grid, row, 2, "Telefono:", self.afiliado.get('telefono'))
 
         row += 1
@@ -221,10 +234,10 @@ class DetalleAfiliadoDialog(QDialog):
 
         row = 0
         self.add_grid_field(grid, row, 0, "Limitacion:", get_limitacion_descripcion(limitacion_cod))
-        self.add_grid_field(grid, row, 2, "Nivel Ambulacion:", get_ambulacion_descripcion(ambulacion_cod))
+        self.add_grid_field(grid, row, 2, "Tipo Ambulacion:", get_ambulacion_descripcion(ambulacion_cod))
 
         row += 1
-        self.add_grid_field(grid, row, 0, "Causa:", self.afiliado.get('causa'))
+        self.add_grid_field(grid, row, 0, "Causa:", get_causa_descripcion(self.afiliado.get('causa')))
         self.add_grid_field(grid, row, 2, "Discapacidad Asociada:", self.afiliado.get('discap_asociada'))
 
         group.setLayout(grid)
@@ -257,7 +270,7 @@ class DetalleAfiliadoDialog(QDialog):
         grid.setVerticalSpacing(8)
 
         row = 0
-        self.add_grid_field(grid, row, 0, "Ocupacion:", self.afiliado.get('ocupacion'))
+        self.add_grid_field(grid, row, 0, "Ocupacion:", get_ocupacion_descripcion(self.afiliado.get('ocupacion')))
         self.add_grid_field(grid, row, 2, "Centro Trabajo/Estudio:", self.afiliado.get('centro_trabajo'))
 
         row += 1
@@ -266,7 +279,7 @@ class DetalleAfiliadoDialog(QDialog):
         self.add_grid_field(grid, row, 0, "Ingreso Mensual:", ingreso_txt)
 
         row += 1
-        self.add_grid_field(grid, row, 0, "Grado Escolar:", self.afiliado.get('grado_escolar'))
+        self.add_grid_field(grid, row, 0, "Grado Escolar:", get_grado_escolar_descripcion(self.afiliado.get('grado_escolar')))
         self.add_grid_field(grid, row, 2, "Especialidad:", self.afiliado.get('especialidad'))
 
         group.setLayout(grid)
@@ -279,8 +292,8 @@ class DetalleAfiliadoDialog(QDialog):
         grid.setVerticalSpacing(8)
 
         row = 0
-        self.add_grid_field(grid, row, 0, "Area:", self.afiliado.get('area'))
-        self.add_grid_field(grid, row, 2, "Jefe de Nucleo:", self.afiliado.get('jefe_nucleo'))
+        self.add_grid_field(grid, row, 0, "Area:", get_area_descripcion(self.afiliado.get('area')))
+        self.add_grid_field(grid, row, 2, "Jefe de Nucleo:", get_jefe_nucleo_descripcion(self.afiliado.get('jefe_nucleo')))
 
         row += 1
         cuota = self.afiliado.get('cuota')
@@ -293,7 +306,7 @@ class DetalleAfiliadoDialog(QDialog):
 
         row += 1
         self.add_grid_field(grid, row, 0, "Fecha Baja:", self.format_date(self.afiliado.get('fecha_baja')))
-        self.add_grid_field(grid, row, 2, "Motivo Baja:", self.afiliado.get('motivo_baja'))
+        self.add_grid_field(grid, row, 2, "Motivo Baja:", get_motivo_baja_descripcion(self.afiliado.get('motivo_baja')))
 
         row += 1
         self.add_grid_field(grid, row, 0, "Fecha Creacion:", self.format_datetime(self.afiliado.get('fecha_creacion')))
@@ -413,49 +426,49 @@ class DetalleAfiliadoDialog(QDialog):
         exporter = PDFExporter()
         exporter.export_afiliado(self.afiliado, self)
 
-    def cambiar_direccion(self):
-        """Inicia el proceso de cambio de direccion del afiliado."""
+    def eliminar_del_mapa(self):
+        """Elimina al afiliado del mapa (pone geom=NULL y estado=cambio_direccion)."""
         nombre_completo = f"{self.afiliado.get('nombres', '')} {self.afiliado.get('apellidos', '')}".strip()
+        respuesta = QMessageBox.question(
+            self,
+            "Eliminar del Mapa",
+            f"¿Desea eliminar la ubicación de '{nombre_completo}' del mapa?\n\n"
+            f"El afiliado aparecerá en la lista 'Sin Ubicar' para ser reubicado.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if respuesta != QMessageBox.Yes:
+            return
 
-        dialog = CambioDireccionDialog(nombre_completo, self)
+        afiliado_id = self.afiliado.get('id')
+        success, msg = cambiar_direccion_afiliado(afiliado_id, 'manual')
 
-        if dialog.exec_() == QDialog.Accepted:
-            motivo = dialog.get_motivo()
-            afiliado_id = self.afiliado.get('id')
-
-            success, msg = cambiar_direccion_afiliado(afiliado_id, motivo)
-
-            if success:
-                QMessageBox.information(
-                    self,
-                    "Cambio Registrado",
-                    f"El cambio de direccion se registro correctamente.\n\n"
-                    f"El afiliado '{nombre_completo}' ahora aparecera en la lista 'Sin Ubicar'.\n"
-                    f"Ubicalo nuevamente en el mapa desde esa lista."
-                )
-
-                self.accept()
-
-                if hasattr(self.parent_dialog, 'load_all_afiliados'):
-                    try:
-                        self.parent_dialog.load_all_afiliados()
-                    except Exception as e:
-                        print(f"[DEBUG] Error al recargar afiliados: {e}")
-
-                if hasattr(self.parent_dialog, 'load_unlocated_afiliados') and hasattr(self.parent_dialog, 'table_unlocated'):
-                    try:
-                        self.parent_dialog.load_unlocated_afiliados()
-                    except Exception as e:
-                        print(f"[DEBUG] Error al recargar sin ubicar: {e}")
-
-                if hasattr(self.parent_dialog, 'refresh_layer'):
-                    try:
-                        self.parent_dialog.refresh_layer()
-                    except Exception as e:
-                        print(f"[DEBUG] Error al refrescar capa: {e}")
-            else:
-                QMessageBox.critical(
-                    self,
-                    "Error",
-                    f"No se pudo registrar el cambio de direccion:\n\n{msg}"
-                )
+        if success:
+            # Quitar el punto del mapa inmediatamente
+            try:
+                force_reload_afiliados_layer()
+            except Exception as e:
+                print(f"[DEBUG] Error al recargar capa: {e}")
+            self.accept()
+            parent_dialog = self.parent_dialog
+            if parent_dialog is not None and hasattr(parent_dialog, 'load_all_afiliados'):
+                try:
+                    parent_dialog.load_all_afiliados()
+                except Exception as e:
+                    print(f"[DEBUG] Error al recargar afiliados: {e}")
+            if (
+                parent_dialog is not None
+                and hasattr(parent_dialog, 'load_unlocated_afiliados')
+                and hasattr(parent_dialog, 'table_unlocated')
+            ):
+                try:
+                    parent_dialog.load_unlocated_afiliados()
+                except Exception as e:
+                    print(f"[DEBUG] Error al recargar sin ubicar: {e}")
+            if parent_dialog is not None and hasattr(parent_dialog, 'refresh_layer'):
+                try:
+                    parent_dialog.refresh_layer()
+                except Exception as e:
+                    print(f"[DEBUG] Error al refrescar capa: {e}")
+        else:
+            QMessageBox.critical(self, "Error", f"No se pudo eliminar la ubicación:\n\n{msg}")

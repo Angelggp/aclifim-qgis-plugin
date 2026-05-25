@@ -384,6 +384,20 @@ class AccessImporter:
         except Exception as e:
             print(f"[IMPORTADOR] Error convirtiendo '{field_name}' a string: {e}")
             return ''
+
+    def _normalize_address(self, value):
+        """Normaliza dirección para comparar cambios sin ruido de formato."""
+        import unicodedata
+        if value is None:
+            return ''
+        text = str(value).strip().lower()
+        # Eliminar caracteres de control invisibles que pueden venir de Access
+        text = ''.join(ch for ch in text if unicodedata.category(ch)[0] != 'C')
+        # Normalizar acentos/diacríticos: 'é' y 'e' se tratan igual
+        text = unicodedata.normalize('NFKD', text)
+        text = ''.join(ch for ch in text if not unicodedata.combining(ch))
+        # Compactar espacios consecutivos para evitar falsos positivos
+        return ' '.join(text.split())
     
     def auto_detect_and_import(self, password=None, progress_callback=None):
         """
@@ -669,6 +683,7 @@ class AccessImporter:
             nuevos = 0
             actualizados = 0
             cambios_direccion = 0
+            afiliados_cambio_direccion = []
             eliminados = 0
             errores = 0
             
@@ -701,11 +716,13 @@ class AccessImporter:
                     if codigo in afiliados_pg:
                         # AFILIADO EXISTENTE
                         direccion_pg = afiliados_pg[codigo]['direccion'] or ''
+                        direccion_access_norm = self._normalize_address(direccion_access)
+                        direccion_pg_norm = self._normalize_address(direccion_pg)
                         geom_pg = afiliados_pg[codigo]['geom']
                         
                         # ¿Cambió la dirección?
-                        if direccion_access != direccion_pg:
-                            # CAMBIO DE DIRECCIÓN
+                        if direccion_access_norm != direccion_pg_norm and geom_pg is not None:
+                            # CAMBIO DE DIRECCIÓN (solo si tenía coordenadas: necesita re-ubicarse)
                             cursor.execute(
                                 """
                                 UPDATE afiliados 
@@ -740,16 +757,20 @@ class AccessImporter:
                                  codigo)
                             )
                             cambios_direccion += 1
+                            afiliados_cambio_direccion.append(
+                                f"{afiliado.get('nombres', '').strip()} {afiliado.get('apellidos', '').strip()}".strip()
+                            )
                             print(f"[SYNC] Cambio dirección: {codigo} - {afiliado['nombres']} {afiliado['apellidos']}")
                         else:
-                            # ACTUALIZACIÓN NORMAL (solo datos literales)
+                            # ACTUALIZACIÓN NORMAL (sin cambio de dirección relevante,
+                            # o dirección cambió pero el afiliado aún no tiene coordenadas)
                             cursor.execute(
                                 """
                                 UPDATE afiliados 
                                 SET nombres = %s, apellidos = %s, carnet_id = %s,
                                     sexo = %s, fecha_nacimiento = %s, edad = %s,
                                     lugar_nacimiento = %s, nacionalidad = %s, ciudadania = %s,
-                                    hijo_de = %s, locacion = %s, reparto = %s,
+                                    hijo_de = %s, locacion = %s, direccion = %s, reparto = %s,
                                     telefono = %s, area = %s, cuota = %s, estado_civil = %s,
                                     jefe_nucleo = %s, no_hijos = %s, conviventes = %s,
                                     no_personas_dep = %s, org_rev = %s, limitacion = %s,
@@ -764,7 +785,7 @@ class AccessImporter:
                                 (afiliado['nombres'], afiliado['apellidos'], afiliado['carnet_id'],
                                  afiliado['sexo'], afiliado['fecha_nacimiento'], afiliado['edad'],
                                  afiliado['lugar_nacimiento'], afiliado['nacionalidad'], afiliado['ciudadania'],
-                                 afiliado['hijo_de'], afiliado['locacion'], afiliado['reparto'],
+                                 afiliado['hijo_de'], afiliado['locacion'], afiliado['direccion'], afiliado['reparto'],
                                  afiliado['telefono'], afiliado['area'], afiliado['cuota'], afiliado['estado_civil'],
                                  afiliado['jefe_nucleo'], afiliado['no_hijos'], afiliado['conviventes'],
                                  afiliado['no_personas_dep'], afiliado['org_rev'], afiliado['limitacion'],
@@ -850,6 +871,7 @@ class AccessImporter:
                 'nuevos': nuevos,
                 'actualizados': actualizados,
                 'cambios_direccion': cambios_direccion,
+                'afiliados_cambio_direccion': afiliados_cambio_direccion,
                 'eliminados': eliminados,
                 'errores': errores,
                 'total_procesados': len(afiliados)
@@ -1242,10 +1264,10 @@ def get_afiliado_by_id(afiliado_id):
         return None
 
 
-def search_afiliados(nombre=None, codigo=None, carnet_id=None, apellido=None):
+def search_afiliados(nombre=None, codigo=None, carnet_id=None, apellido=None, pk_id=None):
     """
     Busca afiliados con filtros múltiples
-    Retorna: list de dict con id, codigo, carnet_id, nombres, apellidos, direccion
+    Retorna: list de dict con id, codigo, carnet_id, nombres, apellidos, direccion, estado, lon, lat
     """
     config = load_db_config()
     if not config:
@@ -1263,7 +1285,8 @@ def search_afiliados(nombre=None, codigo=None, carnet_id=None, apellido=None):
         
         # Construir query dinámica
         query = """
-            SELECT id, codigo, carnet_id, nombres, apellidos, direccion, estado
+            SELECT id, codigo, carnet_id, nombres, apellidos, direccion, estado,
+                   ST_X(geom) as lon, ST_Y(geom) as lat
             FROM afiliados 
             WHERE 1=1
         """
@@ -1272,20 +1295,30 @@ def search_afiliados(nombre=None, codigo=None, carnet_id=None, apellido=None):
 
         # Coincidencia por cualquiera de los filtros llenados (OR)
         if nombre:
-            conditions.append("LOWER(nombres) LIKE LOWER(%s)")
-            params.append(f'%{nombre}%')
+            # Coincide exacto o empieza con "Ada " (no devuelve Adalberto al buscar Ada)
+            conditions.append("(LOWER(nombres) = LOWER(%s) OR LOWER(nombres) LIKE LOWER(%s))")
+            params.append(nombre)
+            params.append(f'{nombre} %')
 
         if apellido:
-            conditions.append("LOWER(apellidos) LIKE LOWER(%s)")
-            params.append(f'%{apellido}%')
+            conditions.append("(LOWER(apellidos) = LOWER(%s) OR LOWER(apellidos) LIKE LOWER(%s))")
+            params.append(apellido)
+            params.append(f'{apellido} %')
 
         if codigo:
-            conditions.append("codigo LIKE %s")
-            params.append(f'%{codigo}%')
+            conditions.append("LOWER(codigo) LIKE LOWER(%s)")
+            params.append(f'{codigo}%')
 
         if carnet_id:
             conditions.append("carnet_id LIKE %s")
-            params.append(f'%{carnet_id}%')
+            params.append(f'{carnet_id}%')
+
+        if pk_id:
+            try:
+                conditions.append("id = %s")
+                params.append(int(pk_id))
+            except (ValueError, TypeError):
+                pass
 
         if conditions:
             query += " AND (" + " OR ".join(conditions) + ")"
@@ -1305,7 +1338,9 @@ def search_afiliados(nombre=None, codigo=None, carnet_id=None, apellido=None):
                 'nombres': row[3] or '',
                 'apellidos': row[4] or '',
                 'direccion': row[5] or '',
-                'estado': row[6] or 'normal'
+                'estado': row[6] or 'normal',
+                'lon': row[7],
+                'lat': row[8]
             })
         
         cursor.close()

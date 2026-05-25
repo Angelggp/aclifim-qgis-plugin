@@ -2,16 +2,17 @@
 Módulo para exportar información de afiliados a PDF
 """
 import os
+import io
 from datetime import datetime
 from qgis.PyQt.QtWidgets import QFileDialog, QMessageBox
 from qgis.PyQt.QtCore import QStandardPaths
 
 try:
-    from reportlab.lib.pagesizes import letter, A4
+    from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
     from reportlab.lib import colors
     REPORTLAB_AVAILABLE = True
 except ImportError:
@@ -19,7 +20,16 @@ except ImportError:
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from utils.catalogos import get_limitacion_descripcion, get_ambulacion_descripcion
+from utils.catalogos import (
+    get_limitacion_descripcion,
+    get_ambulacion_descripcion,
+    get_causa_descripcion,
+    get_grado_escolar_descripcion,
+    get_ocupacion_descripcion,
+    get_locacion_descripcion,
+    get_jefe_nucleo_descripcion
+)
+from modules.access_importer import get_afiliado_foto_bytes
 
 
 class PDFExporter:
@@ -65,6 +75,13 @@ class PDFExporter:
             textColor=colors.HexColor('#7f8c8d'),
             alignment=TA_LEFT,
             leftIndent=0
+        ))
+
+        self.styles.add(ParagraphStyle(
+            name='Muted',
+            parent=self.styles['Normal'],
+            fontSize=9,
+            textColor=colors.HexColor('#5f6b73')
         ))
         
         # Label
@@ -148,96 +165,87 @@ class PDFExporter:
     
     def _generar_pdf(self, afiliado, ruta_archivo):
         """Genera el archivo PDF con la información del afiliado"""
-        doc = SimpleDocTemplate(ruta_archivo, pagesize=A4,
-                              rightMargin=72, leftMargin=72,
-                              topMargin=72, bottomMargin=18)
+        doc = SimpleDocTemplate(
+            ruta_archivo,
+            pagesize=A4,
+            rightMargin=52,
+            leftMargin=52,
+            topMargin=48,
+            bottomMargin=24
+        )
         
         story = []
         
-        # Título
         nombre_completo = f"{afiliado.get('nombres', '')} {afiliado.get('apellidos', '')}".strip()
-        titulo = Paragraph(f"Información del Afiliado<br/>{nombre_completo or 'Sin nombre'}", 
-                          self.styles['CustomTitle'])
+        titulo = Paragraph(
+            f"Ficha de Afiliado<br/>{nombre_completo or 'Sin nombre'}",
+            self.styles['CustomTitle']
+        )
         story.append(titulo)
-        story.append(Spacer(1, 0.1*inch))
-        
-        # Sección Identificación
-        story.append(Paragraph("IDENTIFICACIÓN Y DATOS PERSONALES", self.styles['SectionTitle']))
-        data = [
-            ["Código:", self._format_value(afiliado.get('codigo')), 
-             "CI (Carnet):", self._format_value(afiliado.get('carnet_id'))],
-            ["Folio:", self._format_value(afiliado.get('folio')), 
-             "ID Sistema:", self._format_value(afiliado.get('id'))],
-            ["Nombres:", self._format_value(afiliado.get('nombres')), 
-             "Apellidos:", self._format_value(afiliado.get('apellidos'))],
-            ["Sexo:", self._format_value(afiliado.get('sexo')), 
-             "Edad:", self._format_value(afiliado.get('edad'))],
-            ["Fecha Nacimiento:", self._format_date(afiliado.get('fecha_nacimiento')), 
-             "Lugar Nacimiento:", self._format_value(afiliado.get('lugar_nacimiento'))],
-            ["Nacionalidad:", self._format_value(afiliado.get('nacionalidad')), 
-             "Ciudadanía:", self._format_value(afiliado.get('ciudadania'))],
-        ]
-        story.append(self._create_table(data))
-        story.append(Spacer(1, 0.2*inch))
-        
-        # Sección Ubicación
-        story.append(Paragraph("UBICACIÓN Y CONTACTO", self.styles['SectionTitle']))
+        story.append(Paragraph(
+            f"Documento generado por ACLIFIM el {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            self.styles['Muted']
+        ))
+        story.append(Spacer(1, 0.14 * inch))
+
+        story.append(self._build_header_block(afiliado))
+        story.append(Spacer(1, 0.18 * inch))
+
         lon = afiliado.get('lon')
         lat = afiliado.get('lat')
-        coords = f"Lon: {lon:.6f}, Lat: {lat:.6f}" if lon and lat else "Sin ubicar"
-        data = [
-            ["Dirección:", self._format_value(afiliado.get('direccion')), 
-             "Reparto:", self._format_value(afiliado.get('reparto'))],
-            ["Locación:", self._format_value(afiliado.get('locacion')), 
-             "Teléfono:", self._format_value(afiliado.get('telefono'))],
-            ["Tipo Teléfono:", self._format_value(afiliado.get('tipo_telefono')), 
-             "Coordenadas GPS:", coords],
-        ]
-        story.append(self._create_table(data))
-        story.append(Spacer(1, 0.2*inch))
-        
-        # Sección Médicos
-        story.append(Paragraph("DATOS MÉDICOS", self.styles['SectionTitle']))
+        coords = f"Lon: {lon:.6f}, Lat: {lat:.6f}" if lon is not None and lat is not None else "Sin ubicar"
+
+        story.append(self._create_section_table("Identificación", [
+            ("Código", self._format_value(afiliado.get('codigo'))),
+            ("CI (Carnet)", self._format_value(afiliado.get('carnet_id'))),
+            ("Folio", self._format_value(afiliado.get('folio'))),
+            ("ID Sistema", self._format_value(afiliado.get('id'))),
+            ("Sexo", self._format_value(afiliado.get('sexo'))),
+            ("Edad", self._format_value(afiliado.get('edad'))),
+            ("Fecha de Nacimiento", self._format_date(afiliado.get('fecha_nacimiento'))),
+            ("Lugar de Nacimiento", self._format_value(afiliado.get('lugar_nacimiento'))),
+            ("Nacionalidad", self._format_value(afiliado.get('nacionalidad'))),
+            ("Ciudadanía", self._format_value(afiliado.get('ciudadania'))),
+        ]))
+
+        story.append(self._create_section_table("Ubicación y Contacto", [
+            ("Dirección", self._format_value(afiliado.get('direccion'))),
+            ("Reparto", self._format_value(afiliado.get('reparto'))),
+            ("Locación", get_locacion_descripcion(afiliado.get('locacion'))),
+            ("Teléfono", self._format_value(afiliado.get('telefono'))),
+            ("Tipo de Teléfono", self._format_value(afiliado.get('tipo_telefono'))),
+            ("Coordenadas GPS", coords),
+        ]))
+
         limitacion_cod = afiliado.get('limitacion_cod') or afiliado.get('limitacion')
         limitacion_desc = get_limitacion_descripcion(limitacion_cod)
         ambulacion_cod = afiliado.get('ambulacion_cod') or afiliado.get('nivel_ambulacion')
         ambulacion_desc = get_ambulacion_descripcion(ambulacion_cod)
-        data = [
-            ["Limitación:", limitacion_desc, "Ambulación:", ambulacion_desc],
-            ["Causa:", self._format_value(afiliado.get('causa')), 
-             "Discapacidad Asociada:", self._format_value(afiliado.get('discap_asociada'))],
-        ]
-        story.append(self._create_table(data))
-        story.append(Spacer(1, 0.2*inch))
-        
-        # Sección Familiares
-        story.append(Paragraph("DATOS FAMILIARES", self.styles['SectionTitle']))
-        data = [
-            ["Hijo de:", self._format_value(afiliado.get('hijo_de')), 
-             "Estado Civil:", self._format_value(afiliado.get('estado_civil'))],
-            ["Número de Hijos:", self._format_value(afiliado.get('no_hijos')), 
-             "Conviventes:", self._format_value(afiliado.get('conviventes'))],
-            ["Personas Dependientes:", self._format_value(afiliado.get('no_personas_dep')), "", ""],
-        ]
-        story.append(self._create_table(data))
-        story.append(Spacer(1, 0.2*inch))
-        
-        # Sección Laborales
-        story.append(Paragraph("DATOS LABORALES Y EDUCATIVOS", self.styles['SectionTitle']))
+        story.append(self._create_section_table("Datos Médicos", [
+            ("Limitación", self._format_value(limitacion_desc)),
+            ("Tipo de Ambulación", self._format_value(ambulacion_desc)),
+            ("Causa", get_causa_descripcion(afiliado.get('causa'))),
+            ("Discapacidad Asociada", self._format_value(afiliado.get('discap_asociada'))),
+        ]))
+
+        story.append(self._create_section_table("Datos Familiares", [
+            ("Hijo de", self._format_value(afiliado.get('hijo_de'))),
+            ("Estado Civil", self._format_value(afiliado.get('estado_civil'))),
+            ("Número de Hijos", self._format_value(afiliado.get('no_hijos'))),
+            ("Conviventes", self._format_value(afiliado.get('conviventes'))),
+            ("Personas Dependientes", self._format_value(afiliado.get('no_personas_dep'))),
+        ]))
+
         ingreso = afiliado.get('ingreso_mensual')
         ingreso_str = f"${ingreso:.2f}" if ingreso else "No especificado"
-        data = [
-            ["Ocupación:", self._format_value(afiliado.get('ocupacion')), 
-             "Centro Trabajo/Estudio:", self._format_value(afiliado.get('centro_trabajo'))],
-            ["Ingreso Mensual:", ingreso_str, "", ""],
-            ["Grado Escolar:", self._format_value(afiliado.get('grado_escolar')), 
-             "Especialidad:", self._format_value(afiliado.get('especialidad'))],
-        ]
-        story.append(self._create_table(data))
-        story.append(Spacer(1, 0.2*inch))
-        
-        # Sección Organización
-        story.append(Paragraph("ORGANIZACIÓN Y FECHAS", self.styles['SectionTitle']))
+        story.append(self._create_section_table("Datos Laborales y Educativos", [
+            ("Ocupación", get_ocupacion_descripcion(afiliado.get('ocupacion'))),
+            ("Centro de Trabajo/Estudio", self._format_value(afiliado.get('centro_trabajo'))),
+            ("Ingreso Mensual", ingreso_str),
+            ("Grado Escolar", get_grado_escolar_descripcion(afiliado.get('grado_escolar'))),
+            ("Especialidad", self._format_value(afiliado.get('especialidad'))),
+        ]))
+
         cuota = afiliado.get('cuota')
         cuota_str = f"${cuota:.2f}" if cuota else "No especificado"
         estado = afiliado.get('estado', 'normal')
@@ -246,22 +254,20 @@ class PDFExporter:
             'cambio_direccion': 'Cambio de dirección (re-ubicar)',
             'normal': 'Normal'
         }.get(estado, estado)
-        data = [
-            ["Área:", self._format_value(afiliado.get('area')), 
-             "Jefe de Núcleo:", self._format_value(afiliado.get('jefe_nucleo'))],
-            ["Cuota:", cuota_str, "", ""],
-            ["Fecha Ingreso:", self._format_date(afiliado.get('fecha_ingreso')), 
-             "Fecha Alta:", self._format_date(afiliado.get('fecha_alta'))],
-            ["Fecha Baja:", self._format_date(afiliado.get('fecha_baja')), 
-             "Motivo Baja:", self._format_value(afiliado.get('motivo_baja'))],
-            ["Estado:", estado_display, "", ""],
-            ["Fecha Creación:", self._format_datetime(afiliado.get('fecha_creacion')), "", ""],
-            ["Última Modificación:", self._format_datetime(afiliado.get('fecha_modificacion')), "", ""],
-        ]
-        story.append(self._create_table(data))
-        
-        # Footer
-        story.append(Spacer(1, 0.3*inch))
+        story.append(self._create_section_table("Organización y Fechas", [
+            ("Área", self._format_value(afiliado.get('area'))),
+            ("Jefe de Núcleo", get_jefe_nucleo_descripcion(afiliado.get('jefe_nucleo'))),
+            ("Cuota", cuota_str),
+            ("Estado", estado_display),
+            ("Fecha de Ingreso", self._format_date(afiliado.get('fecha_ingreso'))),
+            ("Fecha de Alta", self._format_date(afiliado.get('fecha_alta'))),
+            ("Fecha de Baja", self._format_date(afiliado.get('fecha_baja'))),
+            ("Motivo de Baja", self._format_value(afiliado.get('motivo_baja'))),
+            ("Fecha de Creación", self._format_datetime(afiliado.get('fecha_creacion'))),
+            ("Última Modificación", self._format_datetime(afiliado.get('fecha_modificacion'))),
+        ]))
+
+        story.append(Spacer(1, 0.14 * inch))
         footer = Paragraph(
             f"Documento generado el {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
             self.styles['Footer']
@@ -271,25 +277,107 @@ class PDFExporter:
         # Generar PDF
         doc.build(story)
     
-    def _create_table(self, data):
-        """Crea una tabla formateada"""
-        table = Table(data, colWidths=[1.5*inch, 2.2*inch, 1.5*inch, 2.2*inch])
+    def _build_header_block(self, afiliado):
+        """Crea un bloque de cabecera con datos principales y foto."""
+        estado = afiliado.get('estado', 'normal')
+        estado_display = {
+            'nuevo': 'Nuevo (sin ubicar)',
+            'cambio_direccion': 'Cambio de dirección (re-ubicar)',
+            'normal': 'Normal'
+        }.get(estado, estado)
+
+        left_data = [
+            ["Nombre", self._format_value(f"{afiliado.get('nombres', '')} {afiliado.get('apellidos', '')}".strip())],
+            ["Código", self._format_value(afiliado.get('codigo'))],
+            ["CI", self._format_value(afiliado.get('carnet_id'))],
+            ["Estado", self._format_value(estado_display)],
+        ]
+
+        left_table = Table(left_data, colWidths=[1.35 * inch, 4.45 * inch])
+        left_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.white),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#2f3e46')),
+            ('TEXTCOLOR', (1, 0), (1, -1), colors.HexColor('#22313f')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('LINEBELOW', (0, 0), (-1, -2), 0.35, colors.HexColor('#d9e1e5')),
+        ]))
+
+        photo_flowable = self._build_photo_flowable(afiliado)
+
+        header_table = Table(
+            [[left_table, photo_flowable]],
+            colWidths=[5.8 * inch, 1.3 * inch]
+        )
+        header_table.setStyle(TableStyle([
+            ('BOX', (0, 0), (-1, -1), 0.8, colors.HexColor('#c8d4dc')),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fbfdff')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        return header_table
+
+    def _build_photo_flowable(self, afiliado):
+        """Retorna un flowable de foto tipo carnet o placeholder."""
+        photo_bytes = get_afiliado_foto_bytes(afiliado.get('id'))
+        if photo_bytes:
+            try:
+                image = RLImage(io.BytesIO(photo_bytes))
+                image.drawWidth = 1.1 * inch
+                image.drawHeight = 1.35 * inch
+                return image
+            except Exception:
+                pass
+
+        placeholder = Table(
+            [[Paragraph("Sin foto", self.styles['Muted'])]],
+            colWidths=[1.1 * inch],
+            rowHeights=[1.35 * inch]
+        )
+        placeholder.setStyle(TableStyle([
+            ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor('#c8d4dc')),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f3f6f8')),
+        ]))
+        return placeholder
+
+    def _create_section_table(self, title, rows):
+        """Crea una sección con título y tabla de pares clave-valor."""
+        section_story = [Paragraph(title.upper(), self.styles['SectionTitle'])]
+        table_data = [[f"{label}:", self._format_value(value)] for label, value in rows]
+        table = Table(table_data, colWidths=[2.05 * inch, 4.95 * inch])
         table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#34495e')),
-            ('TEXTCOLOR', (2, 0), (2, -1), colors.HexColor('#34495e')),
-            ('TEXTCOLOR', (1, 0), (1, -1), colors.HexColor('#2c3e50')),
-            ('TEXTCOLOR', (3, 0), (3, -1), colors.HexColor('#2c3e50')),
+            ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9.5),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#2f3e46')),
+            ('TEXTCOLOR', (1, 0), (1, -1), colors.HexColor('#22313f')),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('LEFTPADDING', (0, 0), (-1, -1), 6),
             ('RIGHTPADDING', (0, 0), (-1, -1), 6),
             ('TOPPADDING', (0, 0), (-1, -1), 4),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#ecf0f1')),
+            ('GRID', (0, 0), (-1, -1), 0.45, colors.HexColor('#dfe7ec')),
+            ('ROWBACKGROUNDS', (0, 0), (-1, -1), [colors.white, colors.HexColor('#f9fbfc')]),
         ]))
-        return table
+        section_story.append(table)
+        section_story.append(Spacer(1, 0.14 * inch))
+        return Table([[section_story]], colWidths=[7.0 * inch], style=TableStyle([
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
     
     def _format_value(self, value):
         """Formatea un valor para mostrar"""
