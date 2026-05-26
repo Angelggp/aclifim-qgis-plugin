@@ -62,6 +62,11 @@ from ..modules.centros_interes_manager import (
     get_afiliados_en_radio_centro
 )
 from ..utils.pdf_exporter import PDFExporter
+from ..modules.qfield_manager import (
+    exportar_afiliados_gpkg,
+    leer_cambios_gpkg,
+    aplicar_cambios_gpkg
+)
 
 
 class NumericTableWidgetItem(QTableWidgetItem):
@@ -95,6 +100,7 @@ class MainDialog(QDialog):
         self.tabs.addTab(self.create_manage_tab(), "Gestionar Afiliados")
         self.tabs.addTab(self.create_centros_tab(), "Centros de Interés")
         self.tabs.addTab(self.create_import_tab(), "Importar")
+        self.tabs.addTab(self.create_qfield_tab(), "QField")
         self.tabs.addTab(self.create_config_tab(), "Configuración")
         self.tabs.addTab(self.create_help_tab(), "Ayuda")
         
@@ -539,7 +545,236 @@ class MainDialog(QDialog):
         
         widget.setLayout(layout)
         return widget
-    
+
+    # ------------------------------------------------------------------
+    # Pestaña QField
+    # ------------------------------------------------------------------
+
+    def create_qfield_tab(self):
+        """Pestaña de integración con QField para trabajo de campo."""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setSpacing(12)
+
+        # ── Grupo EXPORTAR ────────────────────────────────────────────
+        grp_export = QGroupBox("Exportar para QField")
+        exp_layout = QVBoxLayout()
+
+        lbl_info_exp = QLabel(
+            "Genera un archivo GeoPackage (.gpkg) con los afiliados.\n"
+            "Cópialo a tu tablet o teléfono y ábrelo en QField para\n"
+            "asignar coordenadas a los afiliados sin ubicar en el campo."
+        )
+        lbl_info_exp.setWordWrap(True)
+        exp_layout.addWidget(lbl_info_exp)
+        exp_layout.addSpacing(6)
+
+        btn_row = QHBoxLayout()
+        btn_exp_sin_ubicar = QPushButton("Exportar Solo Sin Ubicar")
+        btn_exp_sin_ubicar.setToolTip(
+            "Exporta únicamente afiliados que aún no tienen coordenadas"
+        )
+        btn_exp_todos = QPushButton("Exportar Todos")
+        btn_exp_todos.setToolTip("Exporta todos los afiliados de la base de datos")
+        btn_row.addWidget(btn_exp_sin_ubicar)
+        btn_row.addWidget(btn_exp_todos)
+        exp_layout.addLayout(btn_row)
+
+        self.lbl_qfield_export_status = QLabel("")
+        self.lbl_qfield_export_status.setWordWrap(True)
+        exp_layout.addWidget(self.lbl_qfield_export_status)
+
+        grp_export.setLayout(exp_layout)
+        layout.addWidget(grp_export)
+
+        btn_exp_sin_ubicar.clicked.connect(lambda: self.qfield_exportar(solo_sin_ubicar=True))
+        btn_exp_todos.clicked.connect(lambda: self.qfield_exportar(solo_sin_ubicar=False))
+
+        # ── Grupo IMPORTAR ────────────────────────────────────────────
+        grp_import = QGroupBox("Importar desde QField")
+        imp_layout = QVBoxLayout()
+
+        lbl_info_imp = QLabel(
+            "Selecciona el archivo .gpkg que trajiste del campo.\n"
+            "El plugin detectará los afiliados a los que se les asignó\n"
+            "una ubicación y actualizará sus coordenadas en la base de datos."
+        )
+        lbl_info_imp.setWordWrap(True)
+        imp_layout.addWidget(lbl_info_imp)
+        imp_layout.addSpacing(6)
+
+        file_row = QHBoxLayout()
+        self.btn_qfield_seleccionar = QPushButton("Seleccionar archivo .gpkg...")
+        self.lbl_qfield_archivo = QLabel("Ningún archivo seleccionado")
+        self.lbl_qfield_archivo.setWordWrap(True)
+        file_row.addWidget(self.btn_qfield_seleccionar)
+        file_row.addWidget(self.lbl_qfield_archivo, 1)
+        imp_layout.addLayout(file_row)
+
+        # Tabla de previsualización
+        self.table_qfield_preview = QTableWidget(0, 4)
+        self.table_qfield_preview.setHorizontalHeaderLabels(
+            ["ID", "Apellidos", "Nombres", "Coordenadas"]
+        )
+        self.table_qfield_preview.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table_qfield_preview.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table_qfield_preview.setAlternatingRowColors(True)
+        self.table_qfield_preview.setMaximumHeight(200)
+        imp_layout.addWidget(self.table_qfield_preview)
+
+        imp_btn_row = QHBoxLayout()
+        self.btn_qfield_aplicar = QPushButton("Aplicar Cambios")
+        self.btn_qfield_aplicar.setEnabled(False)
+        imp_btn_row.addStretch()
+        imp_btn_row.addWidget(self.btn_qfield_aplicar)
+        imp_layout.addLayout(imp_btn_row)
+
+        self.lbl_qfield_import_status = QLabel("")
+        self.lbl_qfield_import_status.setWordWrap(True)
+        imp_layout.addWidget(self.lbl_qfield_import_status)
+
+        grp_import.setLayout(imp_layout)
+        layout.addWidget(grp_import)
+
+        self.btn_qfield_seleccionar.clicked.connect(self.qfield_seleccionar_archivo)
+        self.btn_qfield_aplicar.clicked.connect(self.qfield_aplicar_cambios)
+
+        self._qfield_cambios_pendientes = []
+
+        layout.addStretch()
+        widget.setLayout(layout)
+        return widget
+
+    def qfield_exportar(self, solo_sin_ubicar=False):
+        """Abre diálogo de guardado y exporta afiliados a GeoPackage."""
+        tipo = "Sin Ubicar" if solo_sin_ubicar else "Todos"
+        filepath, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Exportar Afiliados para QField ({tipo})",
+            f"afiliados_qfield.gpkg",
+            "GeoPackage (*.gpkg)"
+        )
+        if not filepath:
+            return
+
+        if not filepath.lower().endswith('.gpkg'):
+            filepath += '.gpkg'
+
+        self.lbl_qfield_export_status.setText("Exportando...")
+        ok, msg, cantidad = exportar_afiliados_gpkg(filepath, solo_sin_ubicar)
+
+        if ok:
+            self.lbl_qfield_export_status.setText(
+                f"Exportado: {cantidad} afiliados → {os.path.basename(filepath)}"
+            )
+            QMessageBox.information(
+                self,
+                "Exportación completa",
+                f"Se exportaron {cantidad} afiliados.\n\nArchivo:\n{filepath}\n\n"
+                "Cópialo a tu dispositivo y ábrelo con QField."
+            )
+        else:
+            self.lbl_qfield_export_status.setText(f"Error: {msg}")
+            QMessageBox.warning(self, "Error al exportar", msg)
+
+    def qfield_seleccionar_archivo(self):
+        """Selecciona un .gpkg de QField y carga la previsualización."""
+        filepath, _ = QFileDialog.getOpenFileName(
+            self,
+            "Seleccionar GeoPackage de QField",
+            "",
+            "GeoPackage (*.gpkg)"
+        )
+        if not filepath:
+            return
+
+        self.lbl_qfield_archivo.setText(filepath)
+        self.lbl_qfield_import_status.setText("Leyendo archivo...")
+        self.table_qfield_preview.setRowCount(0)
+        self.btn_qfield_aplicar.setEnabled(False)
+        self._qfield_cambios_pendientes = []
+
+        ok, msg, cambios = leer_cambios_gpkg(filepath)
+
+        if not ok:
+            self.lbl_qfield_import_status.setText(f"Error: {msg}")
+            QMessageBox.warning(self, "Error al leer archivo", msg)
+            return
+
+        if not cambios:
+            self.lbl_qfield_import_status.setText(
+                "No se encontraron afiliados con coordenadas en el archivo."
+            )
+            return
+
+        # Poblar tabla de previsualización
+        self.table_qfield_preview.setRowCount(len(cambios))
+        for i, c in enumerate(cambios):
+            self.table_qfield_preview.setItem(i, 0, QTableWidgetItem(str(c['id'])))
+            self.table_qfield_preview.setItem(i, 1, QTableWidgetItem(c['apellidos']))
+            self.table_qfield_preview.setItem(i, 2, QTableWidgetItem(c['nombres']))
+            self.table_qfield_preview.setItem(
+                i, 3,
+                QTableWidgetItem(f"{c['lon']:.6f}, {c['lat']:.6f}")
+            )
+
+        self._qfield_cambios_pendientes = cambios
+        self.btn_qfield_aplicar.setEnabled(True)
+        self.lbl_qfield_import_status.setText(
+            f"{len(cambios)} afiliados listos para actualizar. Revisa la lista y presiona 'Aplicar Cambios'."
+        )
+
+    def qfield_aplicar_cambios(self):
+        """Aplica las coordenadas importadas desde QField a la base de datos."""
+        if not self._qfield_cambios_pendientes:
+            return
+
+        respuesta = QMessageBox.question(
+            self,
+            "Confirmar actualización",
+            f"Se actualizarán las coordenadas de "
+            f"{len(self._qfield_cambios_pendientes)} afiliado(s).\n\n"
+            "¿Deseas continuar?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if respuesta != QMessageBox.Yes:
+            return
+
+        self.lbl_qfield_import_status.setText("Aplicando cambios...")
+        actualizados, errores, msgs_error = aplicar_cambios_gpkg(
+            self._qfield_cambios_pendientes
+        )
+
+        # Refrescar capas
+        force_reload_afiliados_layer()
+        self.load_all_afiliados()
+        self.load_unlocated_afiliados()
+
+        resumen = f"Actualizados: {actualizados}"
+        if errores:
+            resumen += f"  |  Errores: {errores}"
+        self.lbl_qfield_import_status.setText(resumen)
+
+        if errores:
+            detalle = "\n".join(msgs_error[:10])
+            QMessageBox.warning(
+                self,
+                "Importación con errores",
+                f"Se actualizaron {actualizados} afiliados.\n"
+                f"{errores} no pudieron actualizarse:\n\n{detalle}"
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Importación completa",
+                f"Se actualizaron correctamente {actualizados} afiliados en el mapa."
+            )
+
+        # Limpiar estado
+        self._qfield_cambios_pendientes = []
+        self.table_qfield_preview.setRowCount(0)
+        self.btn_qfield_aplicar.setEnabled(False)
+
     def create_config_tab(self):
         """Pestaña de configuración"""
         widget = QWidget()
